@@ -1,0 +1,86 @@
+Git：
+
+$ git config --global user.name "使用者"
+$ git config --global user.email "信箱"
+當在上傳資料/下載物件時，將會以此使用者/信箱顯示
+詳情請見：  https://git-scm.com/book/zh-tw/v2/%E9%96%8B%E5%A7%8B-%E5%88%9D%E6%AC%A1%E8%A8%AD%E5%AE%9A-Git
+
+$ ls 
+查看當前選擇的目錄下資料/資料夾/文件... 等等
+
+$ git status 
+查看當前資料夾的狀態
+若有更動，則會出現紅字
+
+$ git diff
+檔案要先在"本地端"上傳過後才會顯示比對更改過後的的資料
+
+$ git add <file>
+--將物件添加至暫時儲存
+
+$ git restore <file> 
+當物件消失、變更，都可以透過restore<file> 將本地端的資料download下來
+
+$ git restore --staged <file>...
+物件添加暫存區時可能有誤，或者是有修正，需要重新restore或者是下架到unstaged區域
+
+本地端上傳
+-----------------------------------------------------
+$ git commit
+將暫存區上傳到本地端的資料夾中
+$ git commit -m "說明"
+後方的-m為message的意思，有點像description的概念
+-----------------------------------------------------
+
+$ git log
+一旦資料經過commit後，都會保留作者/檔案編號以及-message的資料
+可以查看commit資料中大概做了哪些事情
+
+remote github 上傳
+-----------------------------------------------------
+$ git push
+將本地端commit過後的資料上傳到github裡保存
+-----------------------------------------------------
+
+Example：
+------------------------------------------------------
+$ git status
+On branch main
+Your branch is ahead of 'origin/main' by 1 commit.
+  (use "git push" to publish your local commits)
+
+Changes to be committed:
+  (use "git restore --staged <file>..." to unstage)
+        renamed:    SPLM_ImageRecognition_JPO_mxJPO.java -> file/SPLM_ImageRecognition_JPO_mxJPO.java
+        new file:   file/SPLM_SPLMWebAPI_JPO_mxJPO.java
+
+Changes not staged for commit:
+  (use "git add/rm <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+------------------------------------------------------
+
+
+
+
+
+
+
+git dash 可以使用cmd類似的指令：
+ 
+$ mkdir <filename>
+在該目錄下創建filename資料夾
+ 
+$ rmdir <filename>
+在該目錄下移除filename資料夾
+
+$ cd.><filename>.other附檔名
+cd.>自該目錄下創建名為filename的txt檔
+
+$ notepad <filename>.txt
+開啟文字編輯器，若有在目錄下則開啟，若無則開啟文字編輯器並且詢問是否要新建此txt檔
+
+$ adkjflaemnlaknoefa <Ctrl+u>/<Ctrl+c>
+當前佇列行若存在著不需要時，可以透過ctrl+u快速清除，或是使用ctrl+c略落過此命令，重新開新的一行
+
+$ rm <filename>
+移除當前目錄下的資料/文件
