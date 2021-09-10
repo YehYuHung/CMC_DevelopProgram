@@ -52,30 +52,30 @@ public class SPLM_ImageRecognition_JPO_mxJPO {
 		busSelects.add(DomainConstants.SELECT_ID); // "id"
 		busSelects.add(DomainConstants.SELECT_NAME); // "name"
 		busSelects.add(DomainConstants.SELECT_REVISION); // "revision"
-		busSelects.add(DomainConstants.SELECT_FORMAT_GENERIC); // "format[generic]"
+		busSelects.add(DomainConstants.SELECT_FORMAT_GENERIC); // "format[generic].name"
 
-		// 1. find groupDrawingObj which has Scanning or null for attribute[SPLM_ScanStatus]
+		// 1. find groupDrawingObj which has Scanning or null for
+		// attribute[SPLM_ScanStatus]
 		MapList groupDrawingList = DomainObject.findObjects(context, "SPLM_GroupDrawing", // type
 				"*", // name
 				"*", // revision
 				"*", // owner
 				"eService Production", // vault
 				"attribute[SPLM_ScanStatus]=='' or attribute[SPLM_ScanStatus]=='Scanning'", // where
-				null, true, busSelects, (short) 0);
-
+				null, false, busSelects, (short) 0);
 
 		Iterator groupDrawingItr = groupDrawingList.iterator();
+		DomainObject groupDrawingObj = new DomainObject();
 		while (groupDrawingItr.hasNext()) {
-			
+
 			Map groupDrawingMap = (Map) groupDrawingItr.next();
 			String groupDrawingId = (String) groupDrawingMap.get(DomainConstants.SELECT_ID);
 			String groupDrawingName = (String) groupDrawingMap.get(DomainConstants.SELECT_NAME);
-			DomainObject groupDrawingObj = new DomainObject(groupDrawingId);
+			groupDrawingObj.setId(groupDrawingId);
 
-			// 2. download
-			MapList imageList = groupDrawingObj.getRelatedObjects(context, "SPLM_GroupDrawingImage", // String
-																										// relationshipPattern,
-					"Image", // String typePattern,
+			// 2. download each groupDrawing which has Image picture on it
+			MapList imageList = groupDrawingObj.getRelatedObjects(context, "SPLM_GroupDrawingImage", // relationshipPattern,
+					"Image", // typePattern,
 					busSelects, // StringList objectSelects,
 					relSelects, // StringList relationshipSelects,
 					false, // boolean getTo,
@@ -86,108 +86,109 @@ public class SPLM_ImageRecognition_JPO_mxJPO {
 					1); // int limit)
 
 			MqlUtil.mqlCommand(context, "trigger off");
-			
+
 			// checkout file and doing image recognize in same time / each picture
-			Iterator drawingExpandItr = imageList.iterator();
-			while (drawingExpandItr.hasNext()) {
-				ArrayList<pncObj> pncArrayLists = new ArrayList<pncObj>();
-				Map imagesMap = (Map) drawingExpandItr.next();
-				String imageName = (String) imagesMap.get(DomainConstants.SELECT_NAME);
-				String imageId = (String) imagesMap.get(DomainConstants.SELECT_ID);
-				String imageRevision = (String) imagesMap.get(DomainConstants.SELECT_REVISION);
-				String imageGeneric = (String) imagesMap.get(DomainConstants.SELECT_FORMAT_GENERIC);
+			Iterator imageItr = imageList.iterator();
+			while (imageItr.hasNext()) {
+				ArrayList<PncCoordinates> pncArrayList = new ArrayList<PncCoordinates>();
+				Map imageMap = (Map) imageItr.next();
+				String imageName = (String) imageMap.get(DomainConstants.SELECT_NAME);
+				String imageId = (String) imageMap.get(DomainConstants.SELECT_ID);
+				String imageRevision = (String) imageMap.get(DomainConstants.SELECT_REVISION);
+				String imageGeneric = (String) imageMap.get(DomainConstants.SELECT_FORMAT_GENERIC);
 
 				if (!imageGeneric.isEmpty()) {
 					System.out.println("imageName: " + imageName + " is not empty, downloading now.");
-					DomainObject obj = new DomainObject(imageId);
-					obj.checkoutFile(context, false, "generic", imageGeneric, PICTURES_PATH);
+					DomainObject imageObj = new DomainObject(imageId);
+					imageObj.checkoutFile(context, false, "generic", imageGeneric, PICTURES_PATH);
 
-					// 3. image recognize / 
-					pncArrayLists = run(context, imageGeneric);
+					// 3. image recognize
+					pncArrayList = run(context, imageGeneric);
 					// 4. uploadPnc
-					uploadPncCoordinatesToEPC(pncArrayLists, imageName, imageRevision);
+					uploadPncCoordinatesToEPC(pncArrayList, imageName, imageRevision);
 				}
-				
+
 				// 5. connect groupDrawing / pnc with relationship[SPLM_Related_PNC]
-				StringList pncLists = groupDrawingObj.getInfoList(context, "from[SPLM_Related_PNC].to.id");
-				for (pncObj pncData : pncArrayLists) {
+				StringList pncList = groupDrawingObj.getInfoList(context, "from[SPLM_Related_PNC].to.id");
+				for (PncCoordinates pncData : pncArrayList) {
 					String pnc = pncData.pnc;
 					String pncId = pncData.pncId;
-					if( pncLists.contains(pncId) ) {
+					if (pncList.contains(pncId)) {
 						continue;
 					}
-					
+
 					System.out.println("pic Name: " + groupDrawingName + " pnc id : " + pncId + " pnc : " + pnc);
-					DomainRelationship.connect(context,groupDrawingObj, "SPLM_Related_PNC",
-					new DomainObject(pncId));
-					pncLists.add(pncId);
+					DomainRelationship.connect(context, groupDrawingObj, "SPLM_Related_PNC", new DomainObject(pncId));
+					pncList.add(pncId);
 				}
 				System.out.println("PNC / GroupDrawing Connect succeed.");
 
 			}
 			MqlUtil.mqlCommand(context, "trigger on");
 
-			// 6. change groupDrawingObj attribute to ScanComplete
+			// 6. change groupDrawing attribute[ScanStatus] to ScanComplete
 			groupDrawingObj.setAttributeValue(context, "SPLM_ScanStatus", "ScanComplete");
 			System.out.println("GroupDrawing.attribute[SPLM_ScanStatus] succeed!");
 			System.out.println();
 		}
 
 	}
-	
+
 	/**
 	 * parse picture and gain datas with ArrayList
+	 * 
 	 * @param context
 	 * @param imageGeneric
 	 * @return
 	 * @throws Exception
 	 */
-	public ArrayList<pncObj> run(Context context, String imageGeneric) throws Exception {
+	public ArrayList<PncCoordinates> run(Context context, String imageGeneric) throws Exception {
 		String picturePath = PICTURES_PATH + "\\" + imageGeneric;
 		Gson gson = new Gson();
-		JsonParser parser = new JsonParser(); 
-		ArrayList<pncObj> pncArrayLists = new ArrayList<pncObj>();
+		ArrayList<PncCoordinates> pncArrayList = new ArrayList<PncCoordinates>();
 
 		// open picture file / each one
 		File file = new File(picturePath);
-		if (file.isFile() && file.exists()) {
+		if (!file.isFile() || !file.exists()) {
+			System.out.println("Can't find " + picturePath + " in folder！");
+			return pncArrayList;
+		}
+
+		// recognize and get from json to string type back
+		String imageRecognizeStr = imageRecognition(picturePath);
+		if (!imageRecognizeStr.isEmpty()) {
 			
-			// rec
-			String pncImageRecognizeStr = imageRecognition(picturePath);
+			StringList busSelects = new StringList(DomainConstants.SELECT_ID);
+			ArrayList<PncCoordinates> imageRecognizeDatas = gson.fromJson(imageRecognizeStr,
+					new TypeToken<ArrayList<PncCoordinates>>() {}.getType());
+		
+			// restore existed pnc into new ArrayList 
+			for (PncCoordinates pncData : imageRecognizeDatas) {
 
-			if ( !pncImageRecognizeStr.isEmpty()) {
-				StringList busSelects = new StringList(DomainConstants.SELECT_ID);
-				ArrayList<pncObj> pncImageRecognizeDatas = gson.fromJson(pncImageRecognizeStr, new TypeToken<ArrayList<pncObj>>() {}.getType());
-				
-			    for(pncObj pncData : pncImageRecognizeDatas ){ 
-			    	
-					String pncName = pncData.pnc;
+				String pncName = pncData.pnc;
+				MapList pncExistsList = DomainObject.findObjects(context, "SPLM_PNC", // type
+						pncName, // name
+						"-", // revision
+						"*", // owner
+						"eService Production", // vault
+						"", // where
+						null, false, busSelects, (short) 0);
 
-					MapList pncExistsList = DomainObject.findObjects(context, "SPLM_PNC", // type
-							pncName, // name
-							"-", // revision
-							"*", // owner
-							"eService Production", // vault
-							"", // where
-							null, true, busSelects, (short) 0);
-
-					if (pncExistsList.isEmpty()) {
-						continue;
-					}
-					
-					pncData.pncId = (String) ((Map) pncExistsList.get(0)).get(DomainConstants.SELECT_ID);
-					pncArrayLists.add(pncData);
-			    }
-			}
-
-			Boolean succeedDelete = file.delete();
-			if (succeedDelete) {
-				System.out.println("Delete " + file.toString() + " successful！");
+				if (pncExistsList.isEmpty()) {
+					continue;
+				}
+				pncData.pncId = (String) ((Map) pncExistsList.get(0)).get(DomainConstants.SELECT_ID);
+				pncArrayList.add(pncData);
 			}
 		} else {
-			System.out.println("Can't find " + file.toString() + " exists !");
+			System.out.println(picturePath + " can't recognize any pnc.");
 		}
-		return pncArrayLists;
+		
+		if (file.delete()) {
+			System.out.println("Delete " + file.toString() + " successful！");
+		}
+
+		return pncArrayList;
 	}
 
 	/**
@@ -228,7 +229,7 @@ public class SPLM_ImageRecognition_JPO_mxJPO {
 	 * 
 	 * @param datas
 	 */
-	private void uploadPncCoordinatesToEPC(ArrayList<pncObj> pncArrayLists, String imageName, String imageRevision) {
+	private void uploadPncCoordinatesToEPC(ArrayList<PncCoordinates> pncArrayLists, String imageName, String imageRevision) {
 		System.out.println("uploading...");
 		Connection connection = null;
 		Statement statement = null;
@@ -242,7 +243,7 @@ public class SPLM_ImageRecognition_JPO_mxJPO {
 					+ " where not exists (select * from EPC_PNC_COORDINATES where PNC_NO = ? and GROUP_DRAWING_NO =? and GROUP_DRAWING_REV = ? and X_AXIS = ?  and Y_AXIS = ? )";
 			pStatement = connection.prepareStatement(sqlString);
 
-			for (pncObj pncObj : pncArrayLists) {
+			for (PncCoordinates pncObj : pncArrayLists) {
 				String pncNams = pncObj.pnc; // PNC_NO
 				int x = pncObj.x; // X_AXIS
 				int y = pncObj.y; // Y_AXIS
@@ -314,7 +315,7 @@ public class SPLM_ImageRecognition_JPO_mxJPO {
 		System.out.println("uploading succesful");
 	}
 
-	public class pncObj {
+	public class PncCoordinates {
 		public String pnc; // PNC_NO
 		public int width; // X_LENGTH
 		public int height; // Y_LENGTH
