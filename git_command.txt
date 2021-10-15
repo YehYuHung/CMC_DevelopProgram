@@ -1,5 +1,8 @@
 Git：
 
+$ git init
+資料夾創建後，需要製作成git倉儲，才可以跟remote到github上
+
 $ git config --global user.name "使用者"
 $ git config --global user.email "信箱"
 當在上傳資料/下載物件時，將會以此使用者/信箱顯示
@@ -38,6 +41,12 @@ $ git log
 
 remote github 上傳
 -----------------------------------------------------
+$ git remote add origin git_Repository_URL
+設定本地端git資料夾與github上傳端的連結對象，以確保資料不會上傳錯誤地方
+
+$ git remote -v
+檢查git連結端github repository位置
+
 $ git push
 將本地端commit過後的資料上傳到github裡保存
 -----------------------------------------------------
