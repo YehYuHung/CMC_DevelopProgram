@@ -1,12 +1,17 @@
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.PrintWriter;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 
-//import org.tempuri.SPlmWSLocator;
+import org.tempuri.SPlmWSLocator;
 
 import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 import com.matrixone.apps.domain.DomainConstants;
 import com.matrixone.apps.domain.DomainObject;
 import com.matrixone.apps.domain.util.MapList;
@@ -15,31 +20,101 @@ import matrix.db.Context;
 import matrix.db.JPO;
 import matrix.util.StringList;
 
-public class SPLM_Integration_JPO_mxJPO {
+/*
+ 	DMS System Example :
+  	{
+    "GROUP_CODE": "CW123456",
+    "PNC_NO": [
+      "76169M"
+      "89153M"
+    ],
+    "CHANGE_DATE": "20200116",
+    "GUID": "23231231232131231231232"
+	}
 	
-	public String formatDateTime(String goalDate, String formatType) {
+	ERP System Example :
+	{
+    	"GROUP_CODE": "CW123456",
+    	"PNC_NO": "76169M",
+    	"CHANGE_DATE": "20200116",
+    	"GUID": "23231231232131231231232"
+	},
+	{
+    	"GROUP_CODE": "CW123456",
+    	"PNC_NO": "89153M",
+    	"CHANGE_DATE": "20200116",
+    	"GUID": "23231231232131231231232"
+	}
+ */
+
+public class SPLM_Integration_JPO_mxJPO {
+
+	private String formatNowDateTime(String formatType) {
+		return formatDateTime(new Date().toString(), formatType);
+	}
+
+	private String formatDateTime(String goalDate, String formatType) {
 		SimpleDateFormat sdf = new SimpleDateFormat(formatType);
-		Date date = goalDate == null? new Date():new Date(goalDate);
+		Date date = new Date(goalDate);
 		String alterDate = sdf.format(date);
 		return alterDate;
 	}
-	
-	abstract class CMC_ObjectBase{
-		protected String CHANGE_DATE; 
-		protected String CREATE_DATE; 
-		protected String GUID;
+
+	private void outputDataFile(String fileName, String Data) throws IOException {
+		File log = new File("C:\\temp\\" + fileName);
+		try {
+			if (log.exists() != true) {
+				System.out.println("We had to make " + fileName + " file.");
+				log.createNewFile();
+			}
+			PrintWriter out = new PrintWriter(new FileWriter(log, true));
+			out.append(Data + "\n\n");
+			out.append("******* " + formatNowDateTime("yyyy.MM.dd HH:mm:ss") + "******* " + "\n\n");
+			out.close();
+		} catch (IOException e) {
+			e.printStackTrace();
+			System.out.println("COULD NOT LOG!!");
+		}
 	}
-	
+
+	private <E> String jsonToString(ArrayList<E> arrayList) {
+		return new Gson().toJson(arrayList);
+	}
+
+	abstract class CMC_ObjectBase implements Cloneable {
+		protected String CHANGE_DATE;
+		protected String CREATE_DATE;
+		protected String GUID;
+
+		protected Object clone() throws CloneNotSupportedException {
+			Object cloneObj = super.clone();
+			return cloneObj;
+		}
+	}
+
+	public void tryAll(Context context, String[] args) throws Exception {
+		searchGroupCode(context, args);
+		searchGroupPnc(context, args);
+		searchMcGroupCode(context, args);
+		searchMsPartCategory(context, args);
+		searchOptAltPart(context, args);
+		searchPartGroup(context, args);
+		searchPartModel(context, args);
+		searchPartPnc(context, args);
+		searchPartsCatelogueMc(context, args);
+		searchPnc(context, args);
+		searchVenderAlter(context, args);
+	}
+
 	/**
 	 * 16.PNC
+	 * 
 	 * @param context
 	 * @param args
 	 * @return
 	 * @throws Exception
 	 */
-	public String searchPnc(Context context, String[] args) throws Exception {
-		Gson gson = new Gson();
-
+	public void searchPnc(Context context, String[] args) throws Exception {
 		StringList busSelects = new StringList();
 		busSelects.add(DomainConstants.SELECT_NAME);
 		busSelects.add(DomainConstants.SELECT_ID);
@@ -54,49 +129,42 @@ public class SPLM_Integration_JPO_mxJPO {
 				"*", // owner
 				"eService Production", // vault
 				"", // where
-				null, false, busSelects, (short)6);
+				null, false, busSelects, (short) 6);
 
-		ArrayList<PNC> pncArray = new ArrayList<PNC>();
+		ArrayList<PNCForBoth> pncArray = new ArrayList<PNCForBoth>();
+
+		// json for DMS/ERP system
 		for (Object object : pncList) {
 			Map map = (Map) object;
-			PNC pnc = new PNC();
-			pnc.PNC_NO = (String) map.get(DomainConstants.SELECT_NAME);
-			pnc.PNC_NAME_TC = (String) map.get("attribute[SPLM_Name_TC]");
-			pnc.PNC_NAME_EN = (String) map.get("attribute[SPLM_Name_EN]");
-			pnc.PNC_TYPE = (String) map.get("attribute[SPLM_PNC_Type]");
-			pnc.CHANGE_DATE = formatDateTime((String) map.get(DomainConstants.SELECT_MODIFIED),"yyyyMMdd");
-			pnc.GUID = (String) map.get(DomainConstants.SELECT_ID);
-
-			pncArray.add(pnc);
+			PNCForBoth pncForBothObj = new PNCForBoth();
+			pncForBothObj.PNC_NO = (String) map.get(DomainConstants.SELECT_NAME);
+			pncForBothObj.PNC_NAME_TC = (String) map.get("attribute[SPLM_Name_TC]");
+			pncForBothObj.PNC_NAME_EN = (String) map.get("attribute[SPLM_Name_EN]");
+			pncForBothObj.PNC_TYPE = (String) map.get("attribute[SPLM_PNC_Type]");
+			pncForBothObj.CHANGE_DATE = formatDateTime((String) map.get(DomainConstants.SELECT_MODIFIED), "yyyyMMdd");
+			pncForBothObj.GUID = (String) map.get(DomainConstants.SELECT_ID);
+			pncArray.add(pncForBothObj);
 		}
-//		SPlmWSLocator wsdl = new SPlmWSLocator();
-//
-//		try {
-//			String pncStr = wsdl.getSPlmWSSoap().PNC(gson.toJson(pncArray));
-//			System.out.println(pncStr);
-//		} catch (Exception e) {
-//			e.printStackTrace();
-//		}
-		return gson.toJson(pncArray);
+		outputDataFile("16_DMS.txt", jsonToString(pncArray));
+		outputDataFile("16_ERP.txt", jsonToString(pncArray));
 	}
 
-	public class PNC extends CMC_ObjectBase{
+	public class PNCForBoth extends CMC_ObjectBase {
 		public String PNC_NO;
 		public String PNC_NAME_EN;
 		public String PNC_NAME_TC;
 		public String PNC_TYPE;
 	}
-	
+
 	/**
 	 * 17. GROUP
+	 * 
 	 * @param context
 	 * @param args
 	 * @return
 	 * @throws Exception
 	 */
-	public String searchGroupCode(Context context, String[] args) throws Exception {
-		Gson gson = new Gson();
-
+	public void searchGroupCode(Context context, String[] args) throws Exception {
 		StringList busSelects = new StringList();
 		busSelects.add(DomainConstants.SELECT_NAME);
 		busSelects.add(DomainConstants.SELECT_MODIFIED);
@@ -111,22 +179,25 @@ public class SPLM_Integration_JPO_mxJPO {
 				"", // where
 				null, false, busSelects, Short.parseShort("0"));
 
-		ArrayList<GroupCode> groupCodeArray = new ArrayList<GroupCode>();
+		ArrayList<GroupCodeForBoth> groupCodeArray = new ArrayList<GroupCodeForBoth>();
+
+		// json for DMS/ERP system
 		for (Object object : groupCodeList) {
 			Map map = (Map) object;
-			GroupCode groupCode = new GroupCode();
-			groupCode.GROUP_CODE = (String) map.get(DomainConstants.SELECT_NAME);
-			groupCode.GROUP_NAME_TC = (String) map.get("attribute[SPLM_Name_TC]");
-			groupCode.GROUP_NAME_EN = (String) map.get("attribute[SPLM_Name_EN]");
-			groupCode.CHANGE_DATE = formatDateTime((String) map.get(DomainConstants.SELECT_MODIFIED),"yyyyMMdd");
-			groupCode.GUID = (String) map.get(DomainConstants.SELECT_ID);
-
-			groupCodeArray.add(groupCode);
+			GroupCodeForBoth groupCodeForBothObj = new GroupCodeForBoth();
+			groupCodeForBothObj.GROUP_CODE = (String) map.get(DomainConstants.SELECT_NAME);
+			groupCodeForBothObj.GROUP_NAME_TC = (String) map.get("attribute[SPLM_Name_TC]");
+			groupCodeForBothObj.GROUP_NAME_EN = (String) map.get("attribute[SPLM_Name_EN]");
+			groupCodeForBothObj.CHANGE_DATE = formatDateTime((String) map.get(DomainConstants.SELECT_MODIFIED),
+					"yyyyMMdd");
+			groupCodeForBothObj.GUID = (String) map.get(DomainConstants.SELECT_ID);
+			groupCodeArray.add(groupCodeForBothObj);
 		}
-		return gson.toJson(groupCodeArray);
+		outputDataFile("17_DMS.txt", jsonToString(groupCodeArray));
+		outputDataFile("17_ERP.txt", jsonToString(groupCodeArray));
 	}
 
-	public class GroupCode extends CMC_ObjectBase{
+	public class GroupCodeForBoth extends CMC_ObjectBase {
 		public String GROUP_CODE;
 		public String GROUP_NAME_TC;
 		public String GROUP_NAME_EN;
@@ -134,19 +205,18 @@ public class SPLM_Integration_JPO_mxJPO {
 
 	/**
 	 * 19.PartVendor
+	 * 
 	 * @param context
 	 * @param args
 	 * @return
 	 * @throws Exception
 	 */
-	public String searchVenderAlter(Context context, String[] args) throws Exception {
-		Gson gson = new Gson();
-
+	public void searchVenderAlter(Context context, String[] args) throws Exception {
 		StringList busSelects = new StringList();
 		busSelects.add(DomainConstants.SELECT_NAME);
 		busSelects.add(DomainConstants.SELECT_ID);
 		busSelects.add(DomainConstants.SELECT_MODIFIED);
-//		busSelects.add("attribute[SPLM_SO_Note]");
+		busSelects.add("attribute[SPLM_SO_Note]");
 
 		MapList resultList = DomainObject.findObjects(context, "SPLM_Part", // type
 				"*", // name
@@ -156,46 +226,69 @@ public class SPLM_Integration_JPO_mxJPO {
 				"", // where
 				null, false, busSelects, Short.parseShort("0"));
 
-		ArrayList<VenderAlter> venderAlterArray = new ArrayList<VenderAlter>();
 		DomainObject domObj = new DomainObject();
+		ArrayList<VenderAlterToDMS> venderAlterToDMSArray = new ArrayList<VenderAlterToDMS>();
+		ArrayList<VenderAlterToERP> venderAlterToERPArray = new ArrayList<VenderAlterToERP>();
+
 		for (Object object : resultList) {
 			Map map = (Map) object;
-			VenderAlter venderAlter = new VenderAlter();
 			String partId = (String) map.get(DomainConstants.SELECT_ID);
+			String partName = (String) map.get(DomainConstants.SELECT_NAME);
+			String partModifiedDate = (String) map.get(DomainConstants.SELECT_MODIFIED);
+			String partSoNo = (String) map.get("attribute[SPLM_SO_Note]");
 			domObj.setId(partId);
-			venderAlter.PART_NO = (String) map.get(DomainConstants.SELECT_NAME);
-			venderAlter.VENDOR_NO = domObj.getInfoList(context, "attribute[SPLM_Vendor]");
-//			venderAlter.SO_NO  		= (String)map.get("attribute[SPLM_SO_Note]");
-			venderAlter.CHANGE_DATE = formatDateTime((String) map.get(DomainConstants.SELECT_MODIFIED),"yyyyMMdd");
-			venderAlter.GUID = (String) map.get(DomainConstants.SELECT_ID);
+			StringList partVendor = domObj.getInfoList(context, "attribute[SPLM_Vendor]");
 
-			venderAlterArray.add(venderAlter);
+			// json for DMS system
+			VenderAlterToDMS venderAlterToDMSObj = new VenderAlterToDMS();
+			venderAlterToDMSObj.PART_NO = partName;
+			venderAlterToDMSObj.VENDOR_NO = partVendor;
+			venderAlterToDMSObj.SO_NO = partSoNo;
+			venderAlterToDMSObj.CHANGE_DATE = formatDateTime(partModifiedDate, "yyyyMMdd");
+			venderAlterToDMSObj.GUID = partId;
+			venderAlterToDMSArray.add(venderAlterToDMSObj);
+
+			// json for ERP system
+			for (String vendor : partVendor) {
+				VenderAlterToERP venderAlterToERPObj = new VenderAlterToERP();
+				venderAlterToERPObj.PART_NO = partName;
+				venderAlterToERPObj.SO_NO = partSoNo;
+				venderAlterToERPObj.CHANGE_DATE = formatDateTime(partModifiedDate, "yyyyMMdd");
+				venderAlterToERPObj.VENDOR_NO = vendor;
+				venderAlterToERPObj.GUID = partId;
+				venderAlterToERPArray.add(venderAlterToERPObj);
+			}
 		}
-		return gson.toJson(venderAlterArray);
+		outputDataFile("19_DMS.txt", jsonToString(venderAlterToDMSArray));
+		outputDataFile("19_ERP.txt", jsonToString(venderAlterToERPArray));
 	}
 
-	public class VenderAlter extends CMC_ObjectBase{
+	public class VenderAlterToDMS extends CMC_ObjectBase {
 		public String PART_NO;
 		public StringList VENDOR_NO;
-//		public String SO_NO;
+		public String SO_NO;
+	}
+
+	public class VenderAlterToERP extends CMC_ObjectBase {
+		public String PART_NO;
+		public String VENDOR_NO;
+		public String SO_NO;
 	}
 
 	/**
 	 * 14/15 Opt/Alt
+	 * 
 	 * @param context
 	 * @param args
 	 * @return
 	 * @throws Exception
 	 */
-	public String searchOptPart(Context context, String[] args) throws Exception {
-		Gson gson = new Gson();
-		Map<String, String> paramsMap = JPO.unpackArgs(args);
-		Opt inputOptPart = gson.fromJson(paramsMap.get("json"), Opt.class); // parse Json obj to class
+	public void searchOptAltPart(Context context, String[] args) throws Exception {
 
 		StringList busSelect = new StringList();
 		busSelect.add(DomainConstants.SELECT_ID);
 		busSelect.add(DomainConstants.SELECT_NAME);
-
+		busSelect.add(DomainConstants.SELECT_MODIFIED);
 		StringList relSelect = new StringList();
 		relSelect.add("attribute[SPLM_OptionalType]");
 
@@ -208,13 +301,16 @@ public class SPLM_Integration_JPO_mxJPO {
 				null, false, busSelect, (short) 0);
 
 		DomainObject domObj = new DomainObject();
-		Map<String, ArrayList<String>> mapping = new HashMap<String, ArrayList<String>>();
-		ArrayList<String> relArray = new ArrayList<String>();
+		ArrayList<OptionPartToERP> OptionPartToERPArray = new ArrayList<OptionPartToERP>();
+		ArrayList<AlterPartToERP> AlterPartToERPArray = new ArrayList<AlterPartToERP>();
+		ArrayList<OptionPartToDMS> OptionPartToDMSArray = new ArrayList<OptionPartToDMS>();
+		ArrayList<AlterPartToDMS> AlterPartToDMSArray = new ArrayList<AlterPartToDMS>();
 
 		for (Object partObj : partList) {
 			Map partMap = (Map) partObj;
 			String partId = (String) partMap.get(DomainConstants.SELECT_ID);
 			String partName = (String) partMap.get(DomainConstants.SELECT_NAME);
+			String partModifiedDate = (String) partMap.get(DomainConstants.SELECT_MODIFIED);
 
 			domObj.setId(partId);
 			MapList partOptList = domObj.getRelatedObjects(context, "SPLM_RelatedOptionalPart", // relationshipPattern,
@@ -225,61 +321,106 @@ public class SPLM_Integration_JPO_mxJPO {
 					true, // boolean getFrom,
 					(short) 1, // short recurseToLevel,
 					"", // String objectWhere,
-					"attribute[SPLM_OptionalType]==" + inputOptPart.optionalPart, // String relationshipWhere
+					"", // String relationshipWhere
 					0); // int limit)
 
-			for (Object partOpt : partOptList) {
-				String optPartName = (String) ((Map) partOpt).get(DomainConstants.SELECT_NAME);
+			Map<String, ArrayList<String>> partOptAttTypeMap = new HashMap<String, ArrayList<String>>();
+			for (Object partOptObj : partOptList) {
+				Map partOptMap = (Map) partOptObj;
+				String partOptName = (String) partOptMap.get(DomainConstants.SELECT_NAME);
+				String partOptAttType = (String) partOptMap.get("attribute[SPLM_OptionalType]");
+				partOptAttType = partOptAttType.equalsIgnoreCase("Alternate Part") ? partOptAttType : "Optional Part";
 
-				if (!mapping.containsKey(partName)) {
-					ArrayList<String> alterPartArray = new ArrayList<String>();
-					mapping.put(partName, alterPartArray);
-					alterPartArray.add(optPartName);
+				if (!partOptAttTypeMap.containsKey(partOptAttType)) {
+					ArrayList<String> partOptAttTypeArray = new ArrayList<String>();
+					partOptAttTypeMap.put(partOptAttType, partOptAttTypeArray);
+					partOptAttTypeArray.add(partOptName);
 					continue;
 				}
-				mapping.get(partName).add(optPartName);
+				partOptAttTypeMap.get(partOptAttType).add(partOptName);
 			}
-		}
-		
-		ArrayList<Opt> partOptArray = new ArrayList<Opt>();
-		for (Object splmPartList : partList) {
-			Map partMap = (Map) splmPartList;
-			String part = (String) partMap.get(DomainConstants.SELECT_NAME);
 
-			if (mapping.containsKey(part)) {
-				Opt partOpt = new Opt();
-				partOpt.PART_NO = part;
-				partOpt.CHANGE_DATE = formatDateTime(null ,"yyyyMMdd");
-				partOpt.GUID = (String) partMap.get(DomainConstants.SELECT_ID);
+			// json for Optional_type
+			if (partOptAttTypeMap.containsKey("Optional Part")) {
+				ArrayList<String> partOptOptionPartArray = partOptAttTypeMap.get("Optional Part");
 
-				if (inputOptPart.optionalPart.equalsIgnoreCase("\u9078\u7528\u4ef6")) {
-					partOpt.REUSE_PART_NO = mapping.get(part);
-				} else {
-					partOpt.NEW_PART_NO = mapping.get(part);
+				// DMS system
+				OptionPartToDMS OptionPartToDMSObj = new OptionPartToDMS();
+				OptionPartToDMSObj.PART_NO = partName;
+				OptionPartToDMSObj.REUSE_PART_NO = partOptAttTypeMap.get("Optional Part");
+				OptionPartToDMSObj.CHANGE_DATE = formatDateTime(partModifiedDate, "yyyyMMdd");
+				OptionPartToDMSObj.GUID = partId;
+				OptionPartToDMSArray.add(OptionPartToDMSObj);
+
+				// ERP system
+				for (String partOptOptionalPartName : partOptOptionPartArray) {
+					OptionPartToERP OptionPartToERPObj = new OptionPartToERP();
+					OptionPartToERPObj.PART_NO = partName;
+					OptionPartToERPObj.REUSE_PART_NO = partOptOptionalPartName;
+					OptionPartToERPObj.CHANGE_DATE = formatDateTime(partModifiedDate, "yyyyMMdd");
+					OptionPartToERPObj.GUID = partId;
+					OptionPartToERPArray.add(OptionPartToERPObj);
 				}
-				partOptArray.add(partOpt);
+			}
+
+			// json for Alternate_type
+			if (partOptAttTypeMap.containsKey("Alternate Part")) {
+				ArrayList<String> partOptAlterPartArray = partOptAttTypeMap.get("Alternate Part");
+
+				// DMS system
+				AlterPartToDMS AlterPartToDMSObj = new AlterPartToDMS();
+				AlterPartToDMSObj.PART_NO = partName;
+				AlterPartToDMSObj.NEW_PART_NO = partOptAlterPartArray;
+				AlterPartToDMSObj.CHANGE_DATE = formatDateTime(partModifiedDate, "yyyyMMdd");
+				AlterPartToDMSObj.GUID = partId;
+				AlterPartToDMSArray.add(AlterPartToDMSObj);
+
+				// ERP system
+				for (String partOptAlterPartName : partOptAlterPartArray) {
+					AlterPartToERP AlterPartToERPObj = new AlterPartToERP();
+					AlterPartToERPObj.PART_NO = partName;
+					AlterPartToERPObj.NEW_PART_NO = partOptAlterPartName;
+					AlterPartToERPObj.CHANGE_DATE = formatDateTime(partModifiedDate, "yyyyMMdd");
+					AlterPartToERPObj.GUID = partId;
+					AlterPartToERPArray.add(AlterPartToERPObj);
+				}
 			}
 		}
-		return gson.toJson(partOptArray);
+		outputDataFile("14_Alter_DMS.txt", jsonToString(AlterPartToDMSArray));
+		outputDataFile("14_Optional_DMS.txt", jsonToString(OptionPartToDMSArray));
+		outputDataFile("15_Alter_ERP.txt", jsonToString(AlterPartToERPArray));
+		outputDataFile("15_Optional_ERP.txt", jsonToString(OptionPartToERPArray));
 	}
 
-	public class Opt extends CMC_ObjectBase{
+	public class OptionPartToERP extends CMC_ObjectBase {
 		public String PART_NO;
-		public String optionalPart;
-		public ArrayList<String> NEW_PART_NO;
+		public String REUSE_PART_NO;
+	}
+
+	public class AlterPartToERP extends CMC_ObjectBase {
+		public String PART_NO;
+		public String NEW_PART_NO;
+	}
+
+	public class OptionPartToDMS extends CMC_ObjectBase {
+		public String PART_NO;
 		public ArrayList<String> REUSE_PART_NO;
+	}
+
+	public class AlterPartToDMS extends CMC_ObjectBase {
+		public String PART_NO;
+		public ArrayList<String> NEW_PART_NO;
 	}
 
 	/**
 	 * 11 Part-PNC
+	 * 
 	 * @param context
 	 * @param args
 	 * @return
 	 * @throws Exception
 	 */
-	public String searchPartPnc(Context context, String[] args) throws Exception {
-		Gson gson = new Gson();
-
+	public void searchPartPnc(Context context, String[] args) throws Exception {
 		StringList busSelect = new StringList();
 		busSelect.add(DomainConstants.SELECT_ID);
 		busSelect.add(DomainConstants.SELECT_NAME);
@@ -293,7 +434,9 @@ public class SPLM_Integration_JPO_mxJPO {
 				null, false, busSelect, (short) 0);
 
 		DomainObject domObj = new DomainObject();
-		Map<String, ArrayList<String>> map = new HashMap<String, ArrayList<String>>();
+		Map<String, ArrayList<String>> mapping = new HashMap<String, ArrayList<String>>();
+		ArrayList<partPncToDMS> partPncToDMSArray = new ArrayList<partPncToDMS>();
+		ArrayList<partPncToERP> partPncToERPArray = new ArrayList<partPncToERP>();
 
 		for (Object part : partList) {
 			Map partMap = (Map) part;
@@ -304,49 +447,59 @@ public class SPLM_Integration_JPO_mxJPO {
 			StringList pncNameList = domObj.getInfoList(context, "to[SPLM_RelatedPart].from[SPLM_PNC].name");
 
 			for (String pncName : pncNameList) {
-				if (!map.containsKey(partName)) {
+				if (!mapping.containsKey(partName)) {
 					ArrayList<String> pncArrayList = new ArrayList<String>();
-					map.put(partName, pncArrayList);
+					mapping.put(partName, pncArrayList);
 					pncArrayList.add(pncName);
-				} else if (!map.get(partName).contains(pncName)) {
-					map.get(partName).add(pncName);
+				} else if (!mapping.get(partName).contains(pncName)) {
+					mapping.get(partName).add(pncName);
 				}
 			}
-		}
-		
-		ArrayList<partPnc> partPncArray = new ArrayList<partPnc>();
-		for (Object part : partList) {
-			Map partMap = (Map) part;
-			String partName = (String) partMap.get(DomainConstants.SELECT_NAME);
 
-			if (map.containsKey(partName)) {
-				partPnc partOpt = new partPnc();
-				partOpt.PART_NO = partName;
-				partOpt.PNC_NO = map.get(partName);
-				partOpt.CHANGE_DATE = formatDateTime(null ,"yyyyMMdd");
-				partOpt.GUID = (String) partMap.get(DomainConstants.SELECT_ID);
+			ArrayList<String> pncArrayList = mapping.get(partName);
 
-				partPncArray.add(partOpt);
+			// json for DMS system
+			partPncToDMS partPncToDMSObj = new partPncToDMS();
+			partPncToDMSObj.PART_NO = partName;
+			partPncToDMSObj.PNC_NO = pncArrayList;
+			partPncToDMSObj.CHANGE_DATE = formatDateTime(null, "yyyyMMdd");
+			partPncToDMSObj.GUID = partId;
+			partPncToDMSArray.add(partPncToDMSObj);
+
+			// json for ERP system
+			for (String pncName : pncArrayList) {
+				partPncToERP partPncToERPObj = new partPncToERP();
+				partPncToERPObj.PART_NO = partName;
+				partPncToERPObj.CHANGE_DATE = formatDateTime(null, "yyyyMMdd");
+				partPncToERPObj.GUID = partId;
+				partPncToERPObj.PNC_NO = pncName;
+				partPncToERPArray.add(partPncToERPObj);
 			}
 		}
-		return gson.toJson(partPncArray);
+
+		outputDataFile("11_DMS.txt", jsonToString(partPncToDMSArray));
+		outputDataFile("11_ERP.txt", jsonToString(partPncToERPArray));
 	}
 
-	public class partPnc extends CMC_ObjectBase{
+	public class partPncToDMS extends CMC_ObjectBase {
 		public String PART_NO;
 		public ArrayList<String> PNC_NO;
 	}
 
+	public class partPncToERP extends CMC_ObjectBase {
+		public String PART_NO;
+		public String PNC_NO;
+	}
+
 	/**
 	 * 12 Part-Group
+	 * 
 	 * @param context
 	 * @param args
 	 * @return
 	 * @throws Exception
 	 */
-	public String searchPartGroup(Context context, String[] args) throws Exception {
-		Gson gson = new Gson();
-
+	public void searchPartGroup(Context context, String[] args) throws Exception {
 		StringList busSelect = new StringList();
 		busSelect.add(DomainConstants.SELECT_ID);
 		busSelect.add(DomainConstants.SELECT_NAME);
@@ -363,6 +516,7 @@ public class SPLM_Integration_JPO_mxJPO {
 
 		DomainObject domObj = new DomainObject();
 		Map<String, ArrayList<String>> mapping = new HashMap<String, ArrayList<String>>();
+		ArrayList<PartGroupCodeToDMS> partGroupCodeArray = new ArrayList<PartGroupCodeToDMS>();
 
 		for (Object part : partList) {
 			Map partMap = (Map) part;
@@ -392,41 +546,32 @@ public class SPLM_Integration_JPO_mxJPO {
 					mapping.get(partName).add(attGroupCode);
 				}
 			}
+
+			// json for DMS System
+			PartGroupCodeToDMS partGroupCodeToDMSObj = new PartGroupCodeToDMS();
+			partGroupCodeToDMSObj.PART_NO = partName;
+			partGroupCodeToDMSObj.GROUP_CODE = mapping.get(partName);
+			partGroupCodeToDMSObj.CHANGE_DATE = formatNowDateTime("yyyyMMdd");
+			partGroupCodeToDMSObj.GUID = partId;
+			partGroupCodeArray.add(partGroupCodeToDMSObj);
 		}
-
-		ArrayList<PartGroupCode> partGroupCodeArray = new ArrayList<PartGroupCode>();
-		for (Object part : partList) {
-			Map partMap = (Map) part;
-			String partName = (String) partMap.get(DomainConstants.SELECT_NAME);
-
-			if (mapping.containsKey(partName)) {
-				PartGroupCode partGroupCodeObj = new PartGroupCode();
-				partGroupCodeObj.PART_NO = partName;
-				partGroupCodeObj.GROUP_CODE = mapping.get(partName);
-				partGroupCodeObj.CHANGE_DATE = formatDateTime(null ,"yyyyMMdd");
-				partGroupCodeObj.GUID = (String) partMap.get(DomainConstants.SELECT_ID);
-
-				partGroupCodeArray.add(partGroupCodeObj);
-			}
-		}
-		return gson.toJson(partGroupCodeArray);
+		outputDataFile("12_DMS.txt", jsonToString(partGroupCodeArray));
 	}
 
-	public class PartGroupCode extends CMC_ObjectBase{
+	public class PartGroupCodeToDMS extends CMC_ObjectBase {
 		public String PART_NO;
 		public ArrayList<String> GROUP_CODE;
 	}
 
 	/**
 	 * 18 Group-PNC
+	 * 
 	 * @param context
 	 * @param args
 	 * @return
 	 * @throws Exception
 	 */
-	public String searchGroupPnc(Context context, String[] args) throws Exception {
-		Gson gson = new Gson();
-
+	public void searchGroupPnc(Context context, String[] args) throws Exception {
 		StringList busSelect = new StringList();
 		busSelect.add(DomainConstants.SELECT_ID);
 		busSelect.add("attribute[SPLM_GroupCode]");
@@ -440,61 +585,46 @@ public class SPLM_Integration_JPO_mxJPO {
 				null, false, busSelect, (short) 0);
 
 		DomainObject domObj = new DomainObject();
-
-		Map<String, ArrayList<String>> mapping = new HashMap<String, ArrayList<String>>();
+		ArrayList<GroupCodePncToERP> groupCodePncArray = new ArrayList<GroupCodePncToERP>();
 
 		for (Object groupDrawingObj : groupDrawingList) {
 			Map groupDrawingMap = (Map) groupDrawingObj;
 			String groupDrawingId = (String) groupDrawingMap.get(DomainConstants.SELECT_ID);
-			String attGroupCode = (String) groupDrawingMap.get("attribute[SPLM_GroupCode]");
-
+			String groupDrawingGroupCode = (String) groupDrawingMap.get("attribute[SPLM_GroupCode]");
 			domObj.setId(groupDrawingId);
 			StringList pncNameList = domObj.getInfoList(context, "from[SPLM_Related_PNC].to[SPLM_PNC].name");
 
-			for (String pncName : pncNameList) {
-				if (!mapping.containsKey(attGroupCode)) {
-					ArrayList<String> groupCodeArray = new ArrayList<String>();
-					mapping.put(attGroupCode, groupCodeArray);
-					groupCodeArray.add(pncName);
-				} else if (!mapping.get(attGroupCode).contains(pncName)) {
-					mapping.get(attGroupCode).add(pncName);
-				}
-			}
-		}
-
-		ArrayList<String> attGroupCodeArray = (ArrayList<String>) mapping.keySet();
-		ArrayList<GroupCodePnc> groupCodePncArray = new ArrayList<GroupCodePnc>();
-		for (String attGroupCode : attGroupCodeArray) {
-
 			MapList groupCodeList = DomainObject.findObjects(context, "SPLM_GroupCode", // type
-					attGroupCode, // name
+					groupDrawingGroupCode, // name
 					"*", // revision
 					"*", // owner
 					"eService Production", // vault
 					"", // where
 					null, false, busSelect, (short) 0);
 
+			// json for ERP system
 			for (Object groupCodeObj : groupCodeList) {
-				GroupCodePnc groupCodePncObj = new GroupCodePnc();
-
-				groupCodePncObj.GROUP_CODE = attGroupCode;
-				groupCodePncObj.PNC_NO = mapping.get(attGroupCode);
-				groupCodePncObj.CHANGE_DATE = formatDateTime(null ,"yyyyMMdd");
-				groupCodePncObj.GUID = (String) ((Map) groupCodeObj).get(DomainConstants.SELECT_ID);
-
-				groupCodePncArray.add(groupCodePncObj);
+				for (String pncName : pncNameList) {
+					GroupCodePncToERP groupCodePncObj = new GroupCodePncToERP();
+					groupCodePncObj.PNC_NO = pncName;
+					groupCodePncObj.GROUP_CODE = groupDrawingGroupCode;
+					groupCodePncObj.CHANGE_DATE = formatNowDateTime("yyyyMMdd");
+					groupCodePncObj.GUID = (String) ((Map) groupCodeObj).get(DomainConstants.SELECT_ID);
+					groupCodePncArray.add(groupCodePncObj);
+				}
 			}
 		}
-		return gson.toJson(groupCodePncArray);
+		outputDataFile("18_ERP.txt", jsonToString(groupCodePncArray));
 	}
 
-	public class GroupCodePnc extends CMC_ObjectBase{
+	public class GroupCodePncToERP extends CMC_ObjectBase {
 		public String GROUP_CODE;
-		public ArrayList<String> PNC_NO;
+		public String PNC_NO;
 	}
-	
+
 	/**
 	 * PartAll
+	 * 
 	 * @param context
 	 * @param args
 	 * @return
@@ -502,8 +632,8 @@ public class SPLM_Integration_JPO_mxJPO {
 	 */
 	public String searchPartAll(Context context, String[] args) throws Exception {
 		Gson gson = new Gson();
-//		Map<String, String> paramsMap = JPO.unpackArgs(args);
-//		Part test = gson.fromJson(paramsMap.get("json"), Part.class);
+		Map<String, String> paramsMap = JPO.unpackArgs(args);
+		Part test = gson.fromJson(paramsMap.get("json"), Part.class);
 
 		StringList relSelectPartOpt = new StringList();
 		relSelectPartOpt.add("attribute[SPLM_OptionalType]");
@@ -540,20 +670,19 @@ public class SPLM_Integration_JPO_mxJPO {
 		busSelectPNC.add("attriubte[SPLM_PNC_Type]");
 
 		MapList partList = DomainObject.findObjects(context, "SPLM_Part", // type
-//				test.PART_NO.isEmpty() ? "*" : test.PART_NO, // name
-				"*", // name
+				test.PART_NO.isEmpty() ? "*" : test.PART_NO, // name
 				"*", // revision
 				"*", // owner
 				"eService Production", // vault
 				"", // where
-				null, false, busSelect, (short) 5);
+				null, false, busSelect, (short) 0);
 
 		DomainObject domObj = new DomainObject();
 		ArrayList<Part> partArray = new ArrayList<Part>();
 		MapList partOptList = null;
 		MapList pncList = null;
 		Map<String, String> mapping = null;
-		
+
 		for (Object partObj : partList) {
 			Map partMap = (Map) partObj;
 			Part part = new Part();
@@ -569,7 +698,7 @@ public class SPLM_Integration_JPO_mxJPO {
 			String attpncName = pncNameList.isEmpty() ? "" : pncNameList.get(0);
 			String attPNCType = "";
 			String attTransGroup = "";
-			
+
 			if (!attpncName.isEmpty()) {
 				pncList = DomainObject.findObjects(context, "SPLM_PNC", // type
 						pncNameList.get(0), // name
@@ -578,16 +707,16 @@ public class SPLM_Integration_JPO_mxJPO {
 						"eService Production", // vault
 						"", // where
 						null, false, busSelectPNC, (short) 5);
-				for (Object pncObj : pncList) {					
+				for (Object pncObj : pncList) {
 					attPNCType = (String) ((Map) pncObj).get("attriubte[SPLM_PNC_Type]");
 				}
 			}
-			
-			if(attLocation == "1300") {
-				if(attPNCType == "Z1" || attPNCType == "Z3" || attPNCType == "Z4" || attPNCType == "Z5" ) {
+
+			if (attLocation == "1300") {
+				if (attPNCType == "Z1" || attPNCType == "Z3" || attPNCType == "Z4" || attPNCType == "Z5") {
 					attTransGroup = "DUMY";
 				}
-			}else if(attLocation == "9001" || attLocation == "9000"){
+			} else if (attLocation == "9001" || attLocation == "9000") {
 				attTransGroup = "ZS01";
 			}
 
@@ -620,7 +749,7 @@ public class SPLM_Integration_JPO_mxJPO {
 			part.MATERIAL_GROUP = (attMaterialGroup == "KD" || attMaterialGroup == "KDY") ? "K" : "D";
 			part.UNIT = (String) partMap.get("attribute[SPLM_Unit]");
 			part.PURCHASING_DEPARTMENT_NO = (String) partMap.get("attribute[SPLM_PurchasingGroup]");
-			part.MANUFACTURER_CODE = ""; //Uncheck, got logic
+			part.MANUFACTURER_CODE = ""; // Uncheck, got logic
 			part.VENDOR_NO = (String) partMap.get("attribute[SPLM_Vendor]");
 			part.PART_NAME_C = (String) partMap.get("attribute[SPLM_Name_TC]");
 			part.PART_NAME_E = (String) partMap.get("attribute[SPLM_Name_EN]");
@@ -636,23 +765,23 @@ public class SPLM_Integration_JPO_mxJPO {
 			part.TRANS_GROUP = attTransGroup;
 			part.BIG_CAR_TYPE = (String) partMap.get("attribute[SPLM_DTAT_Only]");
 			part.SO_NO = (String) partMap.get("attribute[SPLM_SO_Note]");
-			part.SO_RELEASE_DATE = attSOIssueDate.isEmpty()? "":formatDateTime(attSOIssueDate,"yyMMdd");
+			part.SO_RELEASE_DATE = attSOIssueDate.isEmpty() ? "" : formatDateTime(attSOIssueDate, "yyMMdd");
 			part.HAS_SUBASSEMBLY = ((String) partMap.get("attribute[SPLM_HaveSubPart]")).equalsIgnoreCase("TRUE") ? "Y"
 					: "N";
 			part.PART_OWNER = (String) partMap.get(DomainConstants.SELECT_OWNER);
 			part.IS_SERVICE_PART = ((String) partMap.get("attribute[SPLM_IsServicePart]")).equalsIgnoreCase("TRUE")
 					? "Y"
 					: "N";
-			part.CREATE_DATE = formatDateTime((String) partMap.get(DomainConstants.SELECT_ORIGINATED) ,"yyyyMMdd");
-			part.CHANGE_DATE = formatDateTime((String) partMap.get(DomainConstants.SELECT_MODIFIED) ,"yyyyMMdd");
+			part.CREATE_DATE = formatDateTime((String) partMap.get(DomainConstants.SELECT_ORIGINATED), "yyyyMMdd");
+			part.CHANGE_DATE = formatDateTime((String) partMap.get(DomainConstants.SELECT_MODIFIED), "yyyyMMdd");
 			part.GUID = partId;
 
 			partArray.add(part);
 		}
 		return gson.toJson(partArray);
 	}
-	
-	public class Part extends CMC_ObjectBase{
+
+	public class Part extends CMC_ObjectBase {
 		public String PART_NO;
 		public String PART_SH_NO;
 		public String K_D;
@@ -687,14 +816,13 @@ public class SPLM_Integration_JPO_mxJPO {
 
 	/**
 	 * 22. ModeCode_GroupCode
+	 * 
 	 * @param context
 	 * @param args
 	 * @return
 	 * @throws Exception
 	 */
-	public String searchMcGroupCode(Context context, String[] args) throws Exception {
-		Gson gson = new Gson();
-
+	public void searchMcGroupCode(Context context, String[] args) throws Exception {
 		StringList busSelect = new StringList();
 		busSelect.add(DomainConstants.SELECT_ID);
 		busSelect.add(DomainConstants.SELECT_NAME);
@@ -705,67 +833,48 @@ public class SPLM_Integration_JPO_mxJPO {
 				"*", // revision
 				"*", // owner
 				"eService Production", // vault
-				"from[SPLM_SBOM]==TRUE", // where
+				"to[SPLM_SBOM]==TRUE", // where
 				null, false, busSelect, (short) 0);
 
 		DomainObject domObj = new DomainObject();
-		Map<String, ArrayList<String>> mapping = new HashMap<String, ArrayList<String>>();
+		ArrayList<McGroupCodeToERP> mcGroupCodeArray = new ArrayList<McGroupCodeToERP>();
 
 		for (Object modelCodeObj : modelCodeList) {
 			Map modelCodeMap = (Map) modelCodeObj;
 			String modelCodeId = (String) modelCodeMap.get(DomainConstants.SELECT_ID);
 			String modelCodeName = (String) modelCodeMap.get(DomainConstants.SELECT_NAME);
-
+			String modelCodeModifiedDate = (String) modelCodeMap.get(DomainConstants.SELECT_MODIFIED);
 			domObj.setId(modelCodeId);
-			StringList attGroupCodeList = domObj.getInfoList(context,
+			StringList mcGroupCodeList = domObj.getInfoList(context,
 					"to[SPLM_SBOM].from[SPLM_GLNO].from[SPLM_RelatedPartsCatalogue].to[SPLM_PartsCatalogue].from[SPLM_RelatedGroupDrawing].to[SPLM_GroupDrawing].attribute[SPLM_GroupCode]");
 
-			for (String attGroupCode : attGroupCodeList) {
-				if (attGroupCode.isEmpty()) {
-					continue;
-				}
-				if (!mapping.containsKey(modelCodeName)) {
-					ArrayList<String> mcArray = new ArrayList<String>();
-					mapping.put(modelCodeName, mcArray);
-					mcArray.add(attGroupCode);
-					continue;
-				}
-				mapping.get(modelCodeName).add(attGroupCode);
-			}
-		}
-
-		ArrayList<McGroupCode> mcGroupCodeArray = new ArrayList<McGroupCode>();
-		for (Object modelCodeObj : modelCodeList) {
-			Map modelCodeMap = (Map) modelCodeObj;
-			String modelCodeName = (String) modelCodeMap.get(DomainConstants.SELECT_NAME);
-			if (mapping.containsKey(modelCodeName)) {
-				McGroupCode mcGroupCodeObj = new McGroupCode();
+			// json for ERP system
+			for (String mcGroupCode : mcGroupCodeList) {
+				McGroupCodeToERP mcGroupCodeObj = new McGroupCodeToERP();
 				mcGroupCodeObj.MODEL_CODE = modelCodeName;
-				mcGroupCodeObj.GROUP_NO = mapping.get(modelCodeName);
-				mcGroupCodeObj.CHANGE_DATE = formatDateTime((String) modelCodeMap.get(DomainConstants.SELECT_MODIFIED) ,"yyyyMMdd");
-				mcGroupCodeObj.GUID = (String) modelCodeMap.get(DomainConstants.SELECT_ID);
-
+				mcGroupCodeObj.GROUP_NO = mcGroupCode;
+				mcGroupCodeObj.CHANGE_DATE = formatDateTime(modelCodeModifiedDate, "yyyyMMdd");
+				mcGroupCodeObj.GUID = modelCodeId;
 				mcGroupCodeArray.add(mcGroupCodeObj);
 			}
 		}
-		return gson.toJson(mcGroupCodeArray);
+		outputDataFile("22_ERP.txt", jsonToString(mcGroupCodeArray));
 	}
 
-	public class McGroupCode extends CMC_ObjectBase{
+	public class McGroupCodeToERP extends CMC_ObjectBase {
 		public String MODEL_CODE;
-		public ArrayList<String> GROUP_NO;
+		public String GROUP_NO;
 	}
 
 	/**
 	 * 20. ModelSeries_PartCategory
+	 * 
 	 * @param context
 	 * @param args
 	 * @return
 	 * @throws Exception
 	 */
-	public String searchMsPartCategory(Context context, String[] args) throws Exception {
-		Gson gson = new Gson();
-
+	public void searchMsPartCategory(Context context, String[] args) throws Exception {
 		StringList busSelect = new StringList();
 		busSelect.add(DomainConstants.SELECT_ID);
 		busSelect.add(DomainConstants.SELECT_NAME);
@@ -780,64 +889,43 @@ public class SPLM_Integration_JPO_mxJPO {
 				null, false, busSelect, (short) 0);
 
 		DomainObject domObj = new DomainObject();
-		Map<String, ArrayList<String>> mapping = new HashMap<String, ArrayList<String>>();
-
+		ArrayList<MsPartCategoryToERP> mcGroupCodeArray = new ArrayList<MsPartCategoryToERP>();
 		for (Object modelSeriesObj : modelSeriesList) {
 			Map modelSeriesMap = (Map) modelSeriesObj;
 			String modelSeriesId = (String) modelSeriesMap.get(DomainConstants.SELECT_ID);
 			String modelSeriesName = (String) modelSeriesMap.get(DomainConstants.SELECT_NAME);
-
+			String modelSeriesModifiedDate = (String) modelSeriesMap.get(DomainConstants.SELECT_MODIFIED);
 			domObj.setId(modelSeriesId);
 			StringList partsCatalogueNameList = domObj.getInfoList(context,
 					"from[SPLM_SBOM].to[SPLM_GLNO].from[SPLM_RelatedPartsCatalogue].to[SPLM_PartsCatalogue].name");
 
+			// json for ERP system
 			for (String partsCatalogueName : partsCatalogueNameList) {
-				if (partsCatalogueName.isEmpty()) {
-					continue;
-				}
-				if (!mapping.containsKey(modelSeriesName)) {
-					ArrayList<String> partCategoryArray = new ArrayList<String>();
-					mapping.put(modelSeriesName, partCategoryArray);
-					partCategoryArray.add(partsCatalogueName);
-					continue;
-				}
-				mapping.get(modelSeriesName).add(partsCatalogueName);
+				MsPartCategoryToERP msPartCategoryToERPObj = new MsPartCategoryToERP();
+				msPartCategoryToERPObj.MODEL_SERIES = modelSeriesName;
+				msPartCategoryToERPObj.PART_CATEGORY_NO = partsCatalogueName;
+				msPartCategoryToERPObj.CHANGE_DATE = formatDateTime(modelSeriesModifiedDate, "yyyyMMdd");
+				msPartCategoryToERPObj.GUID = modelSeriesId;
+				mcGroupCodeArray.add(msPartCategoryToERPObj);
 			}
 		}
-
-		ArrayList<MsPartCategory> mcGroupCodeArray = new ArrayList<MsPartCategory>();
-		for (Object modelSeriesObj : modelSeriesList) {
-			Map modelSeriesMap = (Map) modelSeriesObj;
-			String modelCodeName = (String) modelSeriesMap.get(DomainConstants.SELECT_NAME);
-
-			if (mapping.containsKey(modelCodeName)) {
-				MsPartCategory msPartCategoryObj = new MsPartCategory();
-				msPartCategoryObj.MODEL_SERIES = modelCodeName;
-				msPartCategoryObj.PART_CATEGORY_NO = mapping.get(modelCodeName);
-				msPartCategoryObj.CHANGE_DATE = formatDateTime((String) modelSeriesMap.get(DomainConstants.SELECT_MODIFIED) ,"yyyyMMdd");
-				msPartCategoryObj.GUID = (String) modelSeriesMap.get(DomainConstants.SELECT_ID);
-
-				mcGroupCodeArray.add(msPartCategoryObj);
-			}
-		}
-		return gson.toJson(mcGroupCodeArray);
+		outputDataFile("20_ERP.txt", jsonToString(mcGroupCodeArray));
 	}
 
-	public class MsPartCategory extends CMC_ObjectBase{
+	public class MsPartCategoryToERP extends CMC_ObjectBase {
 		public String MODEL_SERIES;
-		public ArrayList<String> PART_CATEGORY_NO;
+		public String PART_CATEGORY_NO;
 	}
 
 	/**
 	 * 21. PartCategory_ModelCode
+	 * 
 	 * @param context
 	 * @param args
 	 * @return
 	 * @throws Exception
 	 */
-	public String searchPartsCatelogueMc(Context context, String[] args) throws Exception {
-		Gson gson = new Gson();
-
+	public void searchPartsCatelogueMc(Context context, String[] args) throws Exception {
 		StringList busSelect = new StringList();
 		busSelect.add(DomainConstants.SELECT_ID);
 		busSelect.add(DomainConstants.SELECT_NAME);
@@ -848,78 +936,50 @@ public class SPLM_Integration_JPO_mxJPO {
 				"*", // revision
 				"*", // owner
 				"eService Production", // vault
-				"relationship[SPLM_RelatedPartsCatalogue]==TRUE", // where
+				"to[SPLM_RelatedPartsCatalogue]==TRUE", // where
 				null, false, busSelect, (short) 0);
-		System.out.println(partsCatelogueList);
 
-		Map<String, ArrayList<ModelCodeCTG>> mapping = new HashMap<String, ArrayList<ModelCodeCTG>>();
+		ArrayList<PartsCatelogueMcToERP> partsCatelogueMcArray = new ArrayList<PartsCatelogueMcToERP>();
+		DomainObject domObj = new DomainObject();
 		for (Object partsCatelogueObj : partsCatelogueList) {
-			DomainObject domObj = new DomainObject();
 			Map partsCatelogueMap = (Map) partsCatelogueObj;
 			String partsCatelogueId = (String) partsCatelogueMap.get(DomainConstants.SELECT_ID);
 			String partsCatelogueName = (String) partsCatelogueMap.get(DomainConstants.SELECT_NAME);
+			String partsCatelogueModifiedDate = (String) partsCatelogueMap.get(DomainConstants.SELECT_MODIFIED);
 			domObj.setId(partsCatelogueId);
 
-			StringList modelCodeList = domObj.getInfoList(context,
+			StringList modelCodeNameList = domObj.getInfoList(context,
 					"to[SPLM_RelatedPartsCatalogue].from[SPLM_GLNO].from[SPLM_SBOM].to[SPLM_ModelCode].name");
 
-			for (String modelCode : modelCodeList) {
-				if (modelCode.isEmpty()) {
-					continue;
-				}
-
-				ModelCodeCTG modelCodeCTGObj = new ModelCodeCTG();
-				ArrayList<ModelCodeCTG> modelCodeCTGArray = new ArrayList<ModelCodeCTG>();
-				modelCodeCTGObj.MODEL_CODE = modelCode;
-				modelCodeCTGObj.CTG_MODEL = "";
-				modelCodeCTGArray.add(modelCodeCTGObj);
-				if (mapping.containsKey(partsCatelogueName)) {
-					mapping.get(partsCatelogueName).add(modelCodeCTGObj);
-					continue;
-				}
-				mapping.put(partsCatelogueName, modelCodeCTGArray);
+			for (String modelCodeName : modelCodeNameList) {
+				PartsCatelogueMcToERP partsCatelogueMcToERPObj = new PartsCatelogueMcToERP();
+				partsCatelogueMcToERPObj.PART_CATEGORY_NO = partsCatelogueName;
+				partsCatelogueMcToERPObj.MODEL_CODE = modelCodeName;
+				partsCatelogueMcToERPObj.CTG_MODEL = "";
+				partsCatelogueMcToERPObj.CHANGE_DATE = formatDateTime(partsCatelogueModifiedDate, "yyyyMMdd");
+				partsCatelogueMcToERPObj.GUID = partsCatelogueId;
+				partsCatelogueMcArray.add(partsCatelogueMcToERPObj);
 			}
 		}
-
-		ArrayList<PartsCatelogueMc> partsCatelogueArray = new ArrayList<PartsCatelogueMc>();
-		for (Object partsCatelogueObj : partsCatelogueList) {
-			Map partsCatelogueMap = (Map) partsCatelogueObj;
-			String partsCatelogueName = (String) partsCatelogueMap.get(DomainConstants.SELECT_NAME);
-
-			if (mapping.containsKey(partsCatelogueName)) {
-				PartsCatelogueMc partsCatelogueMcObj = new PartsCatelogueMc();
-				partsCatelogueMcObj.PART_CATEGORY_NO = partsCatelogueName;
-				partsCatelogueMcObj.MODEL_CODE_LIST = mapping.get(partsCatelogueName);
-				partsCatelogueMcObj.CHANGE_DATE = formatDateTime((String) partsCatelogueMap.get(DomainConstants.SELECT_MODIFIED) ,"yyyyMMdd");
-				partsCatelogueMcObj.GUID = (String) partsCatelogueMap.get(DomainConstants.SELECT_ID);
-
-				partsCatelogueArray.add(partsCatelogueMcObj);
-			}
-		}
-		return gson.toJson(partsCatelogueArray);
+		outputDataFile("21_ERP.txt", jsonToString(partsCatelogueMcArray));
 	}
 
-	public class PartsCatelogueMc extends CMC_ObjectBase{
+	public class PartsCatelogueMcToERP extends CMC_ObjectBase {
 		public String PART_CATEGORY_NO;
-		public ArrayList<ModelCodeCTG> MODEL_CODE_LIST;
-	}
-
-	public class ModelCodeCTG {
 		public String MODEL_CODE;
 		public String CTG_MODEL;
 	}
 
 	/**
 	 * 13. PartModel
+	 * 
 	 * @param context
 	 * @param args
 	 * @return
 	 * @throws Exception
 	 */
-	public String searchPartModel(Context context, String[] args) throws Exception {
-		Gson gson = new Gson();
+	public void searchPartModel(Context context, String[] args) throws Exception {
 		String splitStr = ",";
-
 		StringList busSelect = new StringList();
 		busSelect.add(DomainConstants.SELECT_ID);
 		busSelect.add(DomainConstants.SELECT_NAME);
@@ -935,44 +995,161 @@ public class SPLM_Integration_JPO_mxJPO {
 				"attribute[SPLM_ModelCode]!='' || attribute[SPLM_ModelSeries]!=''", // where
 				null, false, busSelect, (short) 0);
 
-		ArrayList<PartModel> partModelArray = new ArrayList<PartModel>();
+		ArrayList<PartModelToDMS> partModelToDMSArray = new ArrayList<PartModelToDMS>();
+		ArrayList<PartModelToERP> partModelToERPArray = new ArrayList<PartModelToERP>();
+
 		for (Object partObj : partList) {
 			Map partMap = (Map) partObj;
+			String partName = (String) partMap.get(DomainConstants.SELECT_NAME);
+			String modelSeriesId = (String) partMap.get(DomainConstants.SELECT_ID);
+			String modifiedDate = (String) partMap.get(DomainConstants.SELECT_MODIFIED);
 			ArrayList<String> attMcArray = new ArrayList<String>();
 			ArrayList<String> attMsArray = new ArrayList<String>();
-			String modelSeriesId = (String) partMap.get(DomainConstants.SELECT_ID);
-			String attMc = (String) partMap.get("attribute[SPLM_ModelCode]");
-			String attMs = (String) partMap.get("attribute[SPLM_ModelSeries]");
+			String attMcAll = (String) partMap.get("attribute[SPLM_ModelCode]");
+			String attMsAll = (String) partMap.get("attribute[SPLM_ModelSeries]");
 
-			for (String str : attMc.split(splitStr)) {
-				if(str.isEmpty()) {
-					continue;					
+			for (String str : attMcAll.split(splitStr)) {
+				if (str.isEmpty()) {
+					continue;
 				}
 				attMcArray.add(str);
 			}
-			for (String str : attMs.split(splitStr)) {
-				if(str.isEmpty()) {
-					continue;					
+			for (String str : attMsAll.split(splitStr)) {
+				if (str.isEmpty()) {
+					continue;
 				}
 				attMsArray.add(str);
 			}
-			
-			PartModel partModelObj = new PartModel();
 
-			partModelObj.PART_NO = (String) partMap.get(DomainConstants.SELECT_NAME);
-			partModelObj.MODEL_CODE = attMcArray;
-			partModelObj.MODEL_SERISE = attMsArray;
-			partModelObj.CHANGE_DATE = formatDateTime((String) partMap.get(DomainConstants.SELECT_MODIFIED) ,"yyyyMMdd");
-			partModelObj.GUID = modelSeriesId;
+			// json for DMS system
+			PartModelToDMS partModelToDMSObj = new PartModelToDMS();
+			partModelToDMSObj.PART_NO = partName;
+			partModelToDMSObj.MODEL_CODE = attMcArray;
+			partModelToDMSObj.MODEL_SERISE = attMsArray;
+			partModelToDMSObj.CHANGE_DATE = formatDateTime(modifiedDate, "yyyyMMdd");
+			partModelToDMSObj.GUID = modelSeriesId;
+			partModelToDMSArray.add(partModelToDMSObj);
 
-			partModelArray.add(partModelObj);
+			// json for ERP system
+			PartModelToERP partModelToERPObj = new PartModelToERP();
+			partModelToERPObj.PART_NO = partName;
+			partModelToERPObj.MODEL_SERISE = "";
+			partModelToERPObj.MODEL_CODE = "";
+			partModelToERPObj.CHANGE_DATE = formatDateTime(modifiedDate, "yyyyMMdd");
+			partModelToERPObj.GUID = modelSeriesId;
+
+			if (attMcArray.isEmpty()) {
+				for (String attMs : attMsArray) {
+					PartModelToERP partModelObjNoMc = (PartModelToERP) partModelToERPObj.clone();
+					partModelObjNoMc.MODEL_SERISE = attMs;
+					partModelToERPArray.add(partModelObjNoMc);
+				}
+				continue;
+			}
+
+			if (attMsArray.isEmpty()) {
+				for (String attMc : attMcArray) {
+					PartModelToERP partModelObjNoMs = (PartModelToERP) partModelToERPObj.clone();
+					partModelObjNoMs.MODEL_CODE = attMc;
+					partModelToERPArray.add(partModelObjNoMs);
+				}
+				continue;
+			}
+
+			for (String attMc : attMcArray) {
+				for (String attMs : attMsArray) {
+					PartModelToERP partModelObjAll = (PartModelToERP) partModelToERPObj.clone();
+					partModelObjAll.MODEL_CODE = attMc;
+					partModelObjAll.MODEL_SERISE = attMs;
+					partModelToERPArray.add(partModelObjAll);
+				}
+			}
 		}
-		return gson.toJson(partModelArray);
+		outputDataFile("13_DMS.txt", jsonToString(partModelToDMSArray));
+		outputDataFile("13_ERP.txt", jsonToString(partModelToERPArray));
 	}
 
-	public class PartModel extends CMC_ObjectBase{
+	public class PartModelToDMS extends CMC_ObjectBase {
 		public String PART_NO;
 		public ArrayList<String> MODEL_CODE;
 		public ArrayList<String> MODEL_SERISE;
+	}
+
+	public class PartModelToERP extends CMC_ObjectBase {
+		public String PART_NO;
+		public String MODEL_CODE;
+		public String MODEL_SERISE;
+	}
+
+	public void createDealer(Context context, String[] args) throws Exception {
+		Gson gson = new Gson();
+		SPlmWSLocator wsdl = new SPlmWSLocator();
+		String dealerDate = null;
+
+		try {
+			dealerDate = wsdl.getSPlmWSSoap().dealer(null);
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+
+		String dealerType = "SPLM_Dealer";
+		String dealerVault = "eService Production";
+		String dealerPolicy = "SPLM_Dealer";
+		String dealerName = "";
+
+		dealerDate = dealerDate.replace("{}", "\"\"");
+		ArrayList<Dealer> inputDataArray = gson.fromJson(dealerDate, new TypeToken<ArrayList<Dealer>>() {
+		}.getType());
+
+		Map<String, Map<String, String>> dealerTotalMap = new HashMap<String, Map<String, String>>();
+		DomainObject createDealerObj = new DomainObject();
+
+		for (Dealer dealerObj : inputDataArray) {
+			dealerName = dealerObj.COMPANY_ID;
+
+			if (dealerTotalMap.keySet().contains(dealerName)) {
+				continue;
+			}
+
+			Map<String, String> dealerAttributeMap = new HashMap<String, String>();
+			dealerAttributeMap.put(DomainConstants.SELECT_DESCRIPTION, dealerObj.COMPANY_DESC);
+			dealerAttributeMap.put("SPLM_ContactNumber", dealerObj.TEL_NO);
+			dealerAttributeMap.put("SPLM_Address", dealerObj.ADDRESS);
+			dealerTotalMap.put(dealerName, dealerAttributeMap);
+
+			createDealerObj.createObject(context, dealerType, dealerName, null, dealerPolicy, dealerVault);
+		}
+
+		StringList busSelect = new StringList();
+		busSelect.add(DomainConstants.SELECT_ID);
+		DomainObject domObj = new DomainObject();
+
+		for (String dealerEachName : dealerTotalMap.keySet()) {
+			MapList dealerList = DomainObject.findObjects(context, dealerType, // type
+					dealerEachName, // name
+					"-", // revision
+					"*", // owner
+					dealerVault, // vault
+					null, // where
+					null, false, busSelect, (short) 0);
+
+			String dealerId = (String) ((Map) dealerList.get(0)).get(DomainConstants.SELECT_ID);
+
+			if (!dealerId.isEmpty()) {
+				domObj.setId(dealerId);
+				Map dealerAttributeMap = dealerTotalMap.get(dealerEachName);
+				String description = (String) dealerAttributeMap.get(DomainConstants.SELECT_DESCRIPTION);
+				domObj.setDescription(context, description);
+				dealerAttributeMap.remove(DomainConstants.SELECT_DESCRIPTION);
+				domObj.setAttributeValues(context, dealerAttributeMap);
+			}
+		}
+	}
+
+	class Dealer extends CMC_ObjectBase {
+		public String COMPANY_ID;
+		public String COMPANY_DESC;
+		public String ADDRESS;
+		public String TEL_NO;
 	}
 }
