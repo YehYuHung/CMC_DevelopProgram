@@ -1,11 +1,14 @@
+import java.io.BufferedWriter;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStreamWriter;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -64,11 +67,11 @@ import mc_style.functions.soap.sap.document.sap_com.YSD041_NEW_ServiceLocator;
 
 public class SPLM_Integration_JPO_mxJPO {
 
-	private final String TEST_FILE_PATH = "C:\\temp\\Morga\\json.txt";
-	private final String DEFAULT_ROOT_DIRECTORY = "C:\\temp\\Morga\\";
-	private final String CALL_WSDL = "ERP";
-	private final String PLM_ENV = System.getenv("PLM_ENV");
-	private final short SEARCH_AMOUT = 5;
+	private final static String TEST_FILE_PATH = "C:\\temp\\Morga\\json.txt";
+	private final static String DEFAULT_ROOT_DIRECTORY = "C:\\temp\\Morga\\";
+	private final static String CALL_WSDL = "DMS";
+	private final static String PLM_ENV = System.getenv("PLM_ENV");
+	private final static short SEARCH_AMOUT = 5;
 
 	private String getPropertyURL(String keyStr) {
 		String url = null;
@@ -88,6 +91,150 @@ public class SPLM_Integration_JPO_mxJPO {
 //			url = "http://ymxdp00.china-motor.com.tw:8000/sap/bc/srt/rfc/sap/ymm20/310/ymm20/ymm20";
 //		}
 		return url;
+	}
+
+	/* --- create/modify Part Send SO To ERP/DMS --- */
+	public void createOrChangePartSendSO(Context context, String[] args) throws Exception {
+		MapList soList = DomainObject.findObjects(context, "SPLM_SO", // type
+//				"*", // name
+				"SO0000051", // name
+				"*", // revision
+				"*", // owner
+				"eService Production", // vault
+//				"current==Complete && flag==Wait", // where
+				"", // where
+				null, false, new StringList(DomainConstants.SELECT_ID), (short) 0);
+
+		StringBuffer sb = new StringBuffer();
+		DomainObject domObj = new DomainObject();
+		for (Object object : soList) {
+			String SOId = (String) ((Map) object).get(DomainConstants.SELECT_ID);
+			domObj.setId(SOId);
+			String isServicePart = domObj
+					.getInfoList(context, "from[SPLM_AffectedItem].to[SPLM_Part].attribute[SPLM_IsServicePart]").get(0);
+			if (isServicePart.equalsIgnoreCase("false")) {
+				sb.append(SOId + " is not ServicePart.\n");
+				continue;
+			}
+
+			this._searchServicePart(context, this.getSOAI(context, domObj, getServicePartSelects()));
+			this._searchOptAltPart(context, this.getSOAI(context, domObj, getAltOptPartSelects()), "alt");
+			this._searchOptAltPart(context, this.getSOAI(context, domObj, getAltOptPartSelects()), "opt");
+			this._searchPartVendor(context, this.getSOAI(context, domObj, getVendorSelects()));
+//			domObj.setAttributeValue(context, "flag", "complete");
+		}
+		outputDataFile("NoAffectedItem.txt", sb.toString());
+		System.out.println("*********************SO Sending done.**************************");
+	}
+
+	/* --- Create Excel --- */
+	public void createPOExcel(Context context, String[] args) throws Exception{
+		
+	}
+
+	public void createSOExcel(Context context, String[] args) throws Exception{
+		
+	}
+
+	
+	/* --- only search Part then Call itSelf method for DMS/ERP --- */
+	public void searchServicePart(Context context, String[] args) throws Exception {
+		StringList busSelect = getServicePartSelects();
+		MapList partMapList = DomainObject.findObjects(context, "SPLM_Part", // type
+				"*", // name
+				"*", // revision
+				"*", // owner
+				"eService Production", // vault
+				"", // where
+				null, false, busSelect, (short) SEARCH_AMOUT);
+
+		this._searchServicePart(context, partMapList);
+	}
+
+	public void searchOptAltPart(Context context, String[] args) throws Exception {
+		String strAltOpt = args[0]; // "alt", "opt"
+
+		StringList busSelect = getAltOptPartSelects();
+		MapList partMapList = DomainObject.findObjects(context, "SPLM_Part", // type
+				"*", // name
+				"*", // revision
+				"*", // owner
+				"eService Production", // vault
+				"from[SPLM_RelatedOptionalPart]==TRUE", // where
+				null, false, busSelect, (short) (SEARCH_AMOUT * 2));
+
+		this._searchOptAltPart(context, partMapList, strAltOpt);
+	}
+
+	public void searchPartVendor(Context context, String[] args) throws Exception {
+		StringList busSelect = getVendorSelects();
+		MapList partMapList = DomainObject.findObjects(context, "SPLM_Part", // type
+				"*", // name
+				"*", // revision
+				"*", // owner
+				"eService Production", // vault
+				"from[SPLM_RelatedVendor].attribute[SPLM_Valid]==TRUE", // where
+				null, false, busSelect, (short) SEARCH_AMOUT);
+
+		this._searchPartVendor(context, partMapList);
+	}
+
+	private MapList getSOAI(Context context, DomainObject soObj, StringList busSelect) throws Exception {
+		return soObj.getRelatedObjects(context, "SPLM_AffectedItem", // relationshipPattern,
+				"SPLM_Part", // typePattern,
+				busSelect, // StringList objectSelects,
+				null, // StringList relationshipSelects,
+				false, // boolean getTo,
+				true, // boolean getFrom,
+				(short) 1, // short recurseToLevel,
+				"", // String objectWhere,
+				"", // String relationshipWhere
+				0); // int limit)
+	}
+
+	/* --- Business Select Management--- */
+	private StringList getServicePartSelects() {
+		StringList busSelect = new StringList();
+		busSelect.add(DomainConstants.SELECT_ID); // GUID
+		busSelect.add(DomainConstants.SELECT_NAME); // PART_NO
+		busSelect.add(DomainConstants.SELECT_ORIGINATED); // CREATE_DATE
+		busSelect.add(DomainConstants.SELECT_MODIFIED); // CHANGE_DATE
+		busSelect.add(DomainConstants.SELECT_OWNER); // CHANGE_DATE
+		busSelect.add("attribute[SPLM_OrderType]"); // PART_SH_NO
+		busSelect.add("attribute[SPLM_Location]"); // PLANT
+		busSelect.add("attribute[SPLM_Location_DMS]"); // PLANT
+		busSelect.add("attribute[SPLM_MaterialType]"); // MATERIAL_TYPE
+		busSelect.add("attribute[SPLM_MaterialGroup]"); // MATERIAL_GROUP
+		busSelect.add("attribute[SPLM_Unit]"); // UNIT
+		busSelect.add("attribute[SPLM_PurchasingGroup]"); // PURCHASING_DEPARTMENT_NO
+		busSelect.add("attribute[SPLM_Name_TC]"); // PART_NAME_C
+		busSelect.add("attribute[SPLM_Name_EN]"); // PART_NAME_E
+		busSelect.add("attribute[SPLM_HaveSubPart]"); // HAS_SUBASSEMBLY
+		busSelect.add("attribute[SPLM_IsServicePart]"); // IS_SERVICE_PART
+		busSelect.add("attribute[SPLM_DTAT_Only]"); // BIG_CAR_TYPE
+		busSelect.add("attribute[SPLM_ItemSubType]"); // PART_TYPE
+		busSelect.add("attribute[SPLM_CMC_Code]"); // MODEL_CODE
+		busSelect.add("attribute[SPLM_ModelSeries]"); // MODEL_SERIES
+		busSelect.add("attribute[SPLM_OverseaSalesOnly]"); // MODEL_SERIES
+		busSelect.add("attribute[SPLM_CommissionGroup]"); // PNC_TYPE
+		return busSelect;
+	}
+
+	private StringList getAltOptPartSelects() {
+		StringList busSelect = new StringList();
+		busSelect.add(DomainConstants.SELECT_ID); // GUID
+		busSelect.add(DomainConstants.SELECT_NAME); // PART_NO
+		busSelect.add(DomainConstants.SELECT_MODIFIED); // CHANGE_DATE
+		busSelect.add("attribute[SPLM_Location]");
+		return busSelect;
+	}
+
+	private StringList getVendorSelects() {
+		StringList busSelect = new StringList();
+		busSelect.add(DomainConstants.SELECT_ID); // GUID
+		busSelect.add(DomainConstants.SELECT_NAME); // PART_NO
+		busSelect.add(DomainConstants.SELECT_MODIFIED); // CHANGE_DATE
+		return busSelect;
 	}
 
 	/* ---CMC wsdl connection--- */
@@ -141,7 +288,7 @@ public class SPLM_Integration_JPO_mxJPO {
 		}
 	}
 
-	/* ---myMethod using--- */
+	/* ---Our Method using--- */
 	private String convertNowDateFormat(String formatType) {
 		return convertDateFormat(new Date().toGMTString(), formatType);
 	}
@@ -149,8 +296,7 @@ public class SPLM_Integration_JPO_mxJPO {
 	private String convertDateFormat(String targetDate, String dateFormat) {
 		SimpleDateFormat sdf = new SimpleDateFormat(dateFormat);
 		Date d = new Date(targetDate);
-		String modifiedDate = sdf.format(d);
-		return modifiedDate;
+		return sdf.format(d);
 	}
 
 	private void outputDataFile(String fileName, String dataStr) throws IOException {
@@ -168,8 +314,8 @@ public class SPLM_Integration_JPO_mxJPO {
 				System.out.println("We had to make " + fileName + " file.");
 				dataFile.createNewFile();
 			}
-			java.io.BufferedWriter bw = new java.io.BufferedWriter(
-					new java.io.OutputStreamWriter(new java.io.FileOutputStream(dataFile, true), "utf-8"));
+			BufferedWriter bw = new BufferedWriter(
+					new OutputStreamWriter(new FileOutputStream(dataFile, true), StandardCharsets.UTF_8));
 			bw.write(dataStr + "");
 			bw.newLine();
 			bw.newLine();
@@ -195,10 +341,11 @@ public class SPLM_Integration_JPO_mxJPO {
 	}
 
 	abstract class CMC_ObjBaseAttribute implements Cloneable {
-		protected String CHANGE_DATE;
+		protected String CHANGE_DATE = convertNowDateFormat("yyyyMMdd");
 		protected String CREATE_DATE;
 		protected String GUID;
 
+		@Override
 		protected Object clone() throws CloneNotSupportedException {
 			Object cloneObj = super.clone();
 			return cloneObj;
@@ -241,8 +388,6 @@ public class SPLM_Integration_JPO_mxJPO {
 			pncForBothObj.PNC_NAME_C = (String) pncMap.get("attribute[SPLM_Name_TC]");
 			pncForBothObj.PNC_NAME_E = (String) pncMap.get("attribute[SPLM_Name_EN]");
 			pncForBothObj.PNC_TYPE = (String) pncMap.get("attribute[SPLM_CommissionGroup]");
-			pncForBothObj.CHANGE_DATE = convertDateFormat((String) pncMap.get(DomainConstants.SELECT_MODIFIED),
-					"yyyyMMdd");
 			pncForBothObj.GUID = (String) pncMap.get(DomainConstants.SELECT_ID);
 			pncForBothArray.add(pncForBothObj);
 		}
@@ -314,8 +459,6 @@ public class SPLM_Integration_JPO_mxJPO {
 			groupCodeForBothObj.GROUP_CODE = (String) groupCodeMap.get(DomainConstants.SELECT_NAME);
 			groupCodeForBothObj.GROUP_NAME_C = (String) groupCodeMap.get("attribute[SPLM_Name_TC]");
 			groupCodeForBothObj.GROUP_NAME_E = (String) groupCodeMap.get("attribute[SPLM_Name_EN]");
-			groupCodeForBothObj.CHANGE_DATE = convertDateFormat(
-					(String) groupCodeMap.get(DomainConstants.SELECT_MODIFIED), "yyyyMMdd");
 			groupCodeForBothObj.GUID = (String) groupCodeMap.get(DomainConstants.SELECT_ID);
 			groupCodeForBothArray.add(groupCodeForBothObj);
 		}
@@ -356,23 +499,11 @@ public class SPLM_Integration_JPO_mxJPO {
 	 * @return
 	 * @throws Exception
 	 */
-	public void searchPartVendor(Context context, String[] args) throws Exception {
-		StringList busSelects = new StringList();
-		busSelects.add(DomainConstants.SELECT_NAME);
-		busSelects.add(DomainConstants.SELECT_ID);
-		busSelects.add(DomainConstants.SELECT_MODIFIED);
+	private void _searchPartVendor(Context context, MapList partMapList) throws Exception {
 
 		StringList relatedBusSelects = new StringList();
 		relatedBusSelects.add("current.actual");
 		relatedBusSelects.add(DomainConstants.SELECT_NAME);
-
-		MapList partMapList = DomainObject.findObjects(context, "SPLM_Part", // type
-				"*", // name
-				"*", // revision
-				"*", // owner
-				"eService Production", // vault
-				"from[SPLM_RelatedVendor].attribute[SPLM_Valid]==TRUE", // where
-				null, false, busSelects, (short) SEARCH_AMOUT);
 
 		DomainObject domObj = new DomainObject();
 		ArrayList<VenderAlterToDMS> venderAlterToDMSArray = new ArrayList<VenderAlterToDMS>();
@@ -413,7 +544,7 @@ public class SPLM_Integration_JPO_mxJPO {
 					0); // int limit)
 
 			String soLatestName = "";
-			if (!soMapList.isEmpty()) {
+			if (!soMapList.isEmpty() && !partAttVendorList.isEmpty()) {
 				soMapList.addSortKey("current.actual", "descending", "date");
 				soMapList.sort();
 				soLatestName = (String) ((Map) soMapList.get(0)).get(DomainConstants.SELECT_NAME);
@@ -423,7 +554,6 @@ public class SPLM_Integration_JPO_mxJPO {
 				venderAlterToDMSObj.PART_NO = partName;
 				venderAlterToDMSObj.VENDOR_NO = partAttVendorList;
 				venderAlterToDMSObj.SO_NO = soLatestName;
-				venderAlterToDMSObj.CHANGE_DATE = convertDateFormat(partModifiedDate, "yyyyMMdd");
 				venderAlterToDMSObj.GUID = partId;
 				venderAlterToDMSArray.add(venderAlterToDMSObj);
 
@@ -432,7 +562,6 @@ public class SPLM_Integration_JPO_mxJPO {
 					VenderAlterToERP venderAlterToERPObj = new VenderAlterToERP();
 					venderAlterToERPObj.PART_NO = partName;
 					venderAlterToERPObj.SO_NO = soLatestName;
-					venderAlterToERPObj.CHANGE_DATE = convertDateFormat(partModifiedDate, "yyyyMMdd");
 					venderAlterToERPObj.VENDOR_NO = partAttVendor;
 					venderAlterToERPObj.GUID = partId;
 					venderAlterToERPArray.add(venderAlterToERPObj);
@@ -482,8 +611,7 @@ public class SPLM_Integration_JPO_mxJPO {
 	 * @return
 	 * @throws Exception
 	 */
-	public void searchOptAltPart(Context context, String[] args) throws Exception {
-		String strAltOpt = args[0]; // "alt", "opt"
+	private void _searchOptAltPart(Context context, MapList partMapList, String strAltOpt) throws Exception {
 		String relWhere = null;
 		if (strAltOpt.equalsIgnoreCase("alt")) {
 			relWhere = "attribute[SPLM_OptionalType]=='Alternate Part'";
@@ -493,20 +621,6 @@ public class SPLM_Integration_JPO_mxJPO {
 			System.out.println("args ONLY get 'alt' or 'opt'.");
 			return;
 		}
-
-		StringList busSelects = new StringList();
-		busSelects.add(DomainConstants.SELECT_ID);
-		busSelects.add(DomainConstants.SELECT_NAME);
-		busSelects.add(DomainConstants.SELECT_MODIFIED);
-		busSelects.add("attribute[SPLM_Location]");
-
-		MapList partMapList = DomainObject.findObjects(context, "SPLM_Part", // type
-				"*", // name
-				"*", // revision
-				"*", // owner
-				"eService Production", // vault
-				"from[SPLM_RelatedOptionalPart]==TRUE", // where
-				null, false, busSelects, (short) (SEARCH_AMOUT * 2));
 
 		DomainObject domObj = new DomainObject();
 		ArrayList<OptAltToDMS> OptAltToDMSArray = new ArrayList<OptAltToDMS>();
@@ -544,7 +658,6 @@ public class SPLM_Integration_JPO_mxJPO {
 					OptAltToERPObj.setPART_NO(partName);
 					OptAltToERPObj.setALT_OPT_PART(altOptName);
 					OptAltToERPObj.setLOCATION(location);
-					OptAltToERPObj.CHANGE_DATE = convertDateFormat(partModifiedDate, "yyyyMMdd");
 					OptAltToERPObj.GUID = partId;
 					OptAltToERPArray.add(OptAltToERPObj);
 				}
@@ -557,7 +670,6 @@ public class SPLM_Integration_JPO_mxJPO {
 				OptAltToDMS OptAltToDMSObj = new OptAltToDMS(strAltOpt);
 				OptAltToDMSObj.setPART_NO(partName);
 				OptAltToDMSObj.setALT_OPT_PART(altOptPart);
-				OptAltToDMSObj.CHANGE_DATE = convertDateFormat(partModifiedDate, "yyyyMMdd");
 				OptAltToDMSObj.GUID = partId;
 				OptAltToDMSArray.add(OptAltToDMSObj);
 			}
@@ -698,7 +810,7 @@ public class SPLM_Integration_JPO_mxJPO {
 				"*", // revision
 				"*", // owner
 				"eService Production", // vault
-				"to[SPLM_RelatedPart]==TRUE", // where
+				"to[SPLM_RelatedPart].from[SPLM_PNC]!=''", // where
 				null, false, busSelects, (short) SEARCH_AMOUT);
 
 		DomainObject domObj = new DomainObject();
@@ -719,7 +831,6 @@ public class SPLM_Integration_JPO_mxJPO {
 				PartPncToDMS partPncToDMSObj = new PartPncToDMS();
 				partPncToDMSObj.PART_NO = partName;
 				partPncToDMSObj.PNC_NO = pncNameLists;
-				partPncToDMSObj.CHANGE_DATE = convertNowDateFormat("yyyyMMdd");
 				partPncToDMSObj.GUID = partId;
 				partPncToDMSArray.add(partPncToDMSObj);
 
@@ -728,7 +839,6 @@ public class SPLM_Integration_JPO_mxJPO {
 					PartPncToERP partPncToERPObj = new PartPncToERP();
 					partPncToERPObj.PART_NO = partName;
 					partPncToERPObj.PNC_NO = pncName;
-					partPncToERPObj.CHANGE_DATE = convertNowDateFormat("yyyyMMdd");
 					partPncToERPObj.GUID = partId;
 					partPncToERPArray.add(partPncToERPObj);
 				}
@@ -812,7 +922,6 @@ public class SPLM_Integration_JPO_mxJPO {
 				PartGroupCodeToDMS partGroupCodeToDMSObj = new PartGroupCodeToDMS();
 				partGroupCodeToDMSObj.PART_NO = partName;
 				partGroupCodeToDMSObj.GROUP_CODE = partGroupCodeList;
-				partGroupCodeToDMSObj.CHANGE_DATE = convertNowDateFormat("yyyyMMdd");
 				partGroupCodeToDMSObj.GUID = partId;
 				partGroupCodeToDMSArray.add(partGroupCodeToDMSObj);
 			}
@@ -889,9 +998,8 @@ public class SPLM_Integration_JPO_mxJPO {
 			for (Object groupCodeObj : groupCodeMapList) {
 				for (String pncName : pncNameList) {
 					GroupCodePncToERP groupCodePncToERPObj = new GroupCodePncToERP();
-					groupCodePncToERPObj.PNC_NO = pncName;
 					groupCodePncToERPObj.GROUP_CODE = groupDrawingAttGroupCode;
-					groupCodePncToERPObj.CHANGE_DATE = convertNowDateFormat("yyyyMMdd");
+					groupCodePncToERPObj.PNC_NO = pncName;
 					groupCodePncToERPObj.GUID = (String) ((Map) groupCodeObj).get(DomainConstants.SELECT_ID);
 					groupCodePncToERPArray.add(groupCodePncToERPObj);
 				}
@@ -923,7 +1031,6 @@ public class SPLM_Integration_JPO_mxJPO {
 		public String PNC_NO;
 	}
 
-	// doing
 	/**
 	 * 8. ServicePart
 	 * 
@@ -932,31 +1039,9 @@ public class SPLM_Integration_JPO_mxJPO {
 	 * @return
 	 * @throws Exception
 	 */
-	public void searchServicePart(Context context, String[] args) throws Exception {
+	private void _searchServicePart(Context context, MapList partList) throws Exception {
 
-		StringList busSelect = new StringList();
-		busSelect.add(DomainConstants.SELECT_ID); // GUID
-		busSelect.add(DomainConstants.SELECT_NAME); // PART_NO
-		busSelect.add(DomainConstants.SELECT_ORIGINATED); // CREATE_DATE
-		busSelect.add(DomainConstants.SELECT_MODIFIED); // CHANGE_DATE
-		busSelect.add(DomainConstants.SELECT_OWNER); // CHANGE_DATE
-		busSelect.add("attribute[SPLM_OrderType]"); // PART_SH_NO
-		busSelect.add("attribute[SPLM_Location]"); // PLANT
-		busSelect.add("attribute[SPLM_Location_DMS]"); // PLANT
-		busSelect.add("attribute[SPLM_MaterialType]"); // MATERIAL_TYPE
-		busSelect.add("attribute[SPLM_MaterialGroup]"); // MATERIAL_GROUP
-		busSelect.add("attribute[SPLM_Unit]"); // UNIT
-		busSelect.add("attribute[SPLM_PurchasingGroup]"); // PURCHASING_DEPARTMENT_NO
-		busSelect.add("attribute[SPLM_Name_TC]"); // PART_NAME_C
-		busSelect.add("attribute[SPLM_Name_EN]"); // PART_NAME_E
-		busSelect.add("attribute[SPLM_HaveSubPart]"); // HAS_SUBASSEMBLY
-		busSelect.add("attribute[SPLM_IsServicePart]"); // IS_SERVICE_PART
-		busSelect.add("attribute[SPLM_DTAT_Only]"); // BIG_CAR_TYPE
-		busSelect.add("attribute[SPLM_ItemSubType]"); // PART_TYPE
-		busSelect.add("attribute[SPLM_CMC_Code]"); // MODEL_CODE
-		busSelect.add("attribute[SPLM_ModelSeries]"); // MODEL_SERIES
-		busSelect.add("attribute[SPLM_OverseaSalesOnly]"); // MODEL_SERIES
-		busSelect.add("attribute[SPLM_CommissionGroup]"); // PNC_TYPE
+		StringList busSelect = getServicePartSelects();
 
 		StringList busSelectSO = new StringList();
 		busSelectSO.add(DomainConstants.SELECT_NAME);
@@ -968,14 +1053,6 @@ public class SPLM_Integration_JPO_mxJPO {
 		String optStr = "Optional Part";
 		String domesticSoLocation = "Domestic Item";
 		String exportSoLocation = "Export Item";
-
-		MapList partList = DomainObject.findObjects(context, "SPLM_Part", // type
-				"*", // name
-				"*", // revision
-				"*", // owner
-				"eService Production", // vault
-				"", // where
-				null, false, busSelect, (short) SEARCH_AMOUT);
 
 		DomainObject domObj = new DomainObject();
 		ArrayList<Part> partArrayToDMS = new ArrayList<Part>();
@@ -1180,11 +1257,9 @@ public class SPLM_Integration_JPO_mxJPO {
 						: "N";
 				part.CREATE_DATE = convertDateFormat((String) partMap.get(DomainConstants.SELECT_ORIGINATED),
 						"yyyyMMdd");
-				part.CHANGE_DATE = convertDateFormat((String) partMap.get(DomainConstants.SELECT_MODIFIED), "yyyyMMdd");
 				part.GUID = partId;
 
-				if (CALL_WSDL.equalsIgnoreCase("DMS") && part.EXPORT_PART.equalsIgnoreCase("N")
-						&& !part.BIG_CAR_TYPE.equals("1")) {
+				if (CALL_WSDL.equalsIgnoreCase("DMS") && part.EXPORT_PART.equalsIgnoreCase("N")) {
 					part.MATERIAL_GROUP = (partAttMaterialGroup.equalsIgnoreCase("KD")
 							|| partAttMaterialGroup.equalsIgnoreCase("KDY")) ? "K" : "D";
 					part.PLANT = partAttLocationForDMS;
@@ -1277,7 +1352,6 @@ public class SPLM_Integration_JPO_mxJPO {
 	public void searchMcGroupCode(Context context, String[] args) throws Exception {
 		StringList busSelects = new StringList();
 		busSelects.add(DomainConstants.SELECT_ID);
-		busSelects.add(DomainConstants.SELECT_MODIFIED);
 		busSelects.add("attribute[SPLM_CMC_Code]");
 
 		MapList mcMapList = DomainObject.findObjects(context, "SPLM_ModelCode", // type
@@ -1293,9 +1367,8 @@ public class SPLM_Integration_JPO_mxJPO {
 
 		for (Object obj : mcMapList) {
 			Map mcMap = (Map) obj;
-			String mcName = (String) mcMap.get("attribute[SPLM_CMC_Code]");
+			String mcAttCMCCode = (String) mcMap.get("attribute[SPLM_CMC_Code]");
 			String mcId = (String) mcMap.get(DomainConstants.SELECT_ID);
-			String mcModifiedDate = (String) mcMap.get(DomainConstants.SELECT_MODIFIED);
 			domObj.setId(mcId);
 			StringList groupDrawingAttGroupCodeList = domObj.getInfoList(context,
 					"to[SPLM_SBOM].from[SPLM_GLNO].from[SPLM_RelatedPartsCatalogue].to[SPLM_PartsCatalogue].from[SPLM_RelatedGroupDrawing].to[SPLM_GroupDrawing].attribute[SPLM_GroupCode]");
@@ -1304,9 +1377,8 @@ public class SPLM_Integration_JPO_mxJPO {
 			for (String groupDrawingAttGroupCode : groupDrawingAttGroupCodeList) {
 				if (!groupDrawingAttGroupCode.isEmpty()) {
 					McGroupCodeToERP mcGroupCodeToERPObj = new McGroupCodeToERP();
-					mcGroupCodeToERPObj.MODEL_CODE = mcName;
+					mcGroupCodeToERPObj.MODEL_CODE = mcAttCMCCode;
 					mcGroupCodeToERPObj.GROUP_NO = groupDrawingAttGroupCode;
-					mcGroupCodeToERPObj.CHANGE_DATE = convertNowDateFormat("yyyyMMdd");
 					mcGroupCodeToERPObj.GUID = mcId;
 					mcGroupCodeToERPArray.add(mcGroupCodeToERPObj);
 				}
@@ -1349,7 +1421,6 @@ public class SPLM_Integration_JPO_mxJPO {
 		StringList busSelects = new StringList();
 		busSelects.add(DomainConstants.SELECT_ID);
 		busSelects.add(DomainConstants.SELECT_NAME);
-		busSelects.add(DomainConstants.SELECT_MODIFIED);
 		busSelects.add("attribute[SPLM_Brand]");
 
 		MapList msMapList = DomainObject.findObjects(context, "SPLM_ModelSeries", // type
@@ -1367,7 +1438,6 @@ public class SPLM_Integration_JPO_mxJPO {
 			Map msMap = (Map) obj;
 			String msId = (String) msMap.get(DomainConstants.SELECT_ID);
 			String msName = (String) msMap.get(DomainConstants.SELECT_NAME);
-			String msModifiedDate = (String) msMap.get(DomainConstants.SELECT_MODIFIED);
 			String msBrand = (String) msMap.get("attribute[SPLM_Brand]");
 			domObj.setId(msId);
 
@@ -1381,7 +1451,6 @@ public class SPLM_Integration_JPO_mxJPO {
 					msPartCategoryToERPObj.MODEL_SERIES = msName;
 					msPartCategoryToERPObj.PART_CATEGORY_NO = partsCatalogueName;
 					msPartCategoryToERPObj.MITSUBISHI_FLAG = msBrand.equalsIgnoreCase("mmc") ? "Y" : "N";
-					msPartCategoryToERPObj.CHANGE_DATE = convertNowDateFormat("yyyyMMdd");
 					msPartCategoryToERPObj.GUID = msId;
 					msPartCategoryToERPArray.add(msPartCategoryToERPObj);
 				}
@@ -1427,7 +1496,6 @@ public class SPLM_Integration_JPO_mxJPO {
 		StringList busSelects = new StringList();
 		busSelects.add(DomainConstants.SELECT_ID);
 		busSelects.add(DomainConstants.SELECT_NAME);
-		busSelects.add(DomainConstants.SELECT_MODIFIED);
 
 		MapList partsCatelogueMapList = DomainObject.findObjects(context, "SPLM_PartsCatalogue", // type
 				"*", // name
@@ -1444,7 +1512,6 @@ public class SPLM_Integration_JPO_mxJPO {
 			Map partsCatelogueMap = (Map) obj;
 			String partsCatelogueId = (String) partsCatelogueMap.get(DomainConstants.SELECT_ID);
 			String partsCatelogueName = (String) partsCatelogueMap.get(DomainConstants.SELECT_NAME);
-			String partsCatelogueModifiedDate = (String) partsCatelogueMap.get(DomainConstants.SELECT_MODIFIED);
 			domObj.setId(partsCatelogueId);
 
 			StringList mcNameList = domObj.getInfoList(context,
@@ -1456,7 +1523,6 @@ public class SPLM_Integration_JPO_mxJPO {
 					partsCatelogueMcToERPObj.PART_CATEGORY_NO = partsCatelogueName;
 					partsCatelogueMcToERPObj.MODEL_CODE = mcName;
 					partsCatelogueMcToERPObj.CTG_MODEL = "";
-					partsCatelogueMcToERPObj.CHANGE_DATE = convertNowDateFormat("yyyyMMdd");
 					partsCatelogueMcToERPObj.GUID = partsCatelogueId;
 					partsCatelogueMcToERPArray.add(partsCatelogueMcToERPObj);
 				}
@@ -1544,7 +1610,6 @@ public class SPLM_Integration_JPO_mxJPO {
 			PartModelToDMS partModelToDMSObj = new PartModelToDMS();
 			partModelToDMSObj.PART_NO = partName;
 			partModelToDMSObj.MODEL_CODE = partAttMcArray;
-			partModelToDMSObj.CHANGE_DATE = convertDateFormat(modifiedDate, "yyyyMMdd");
 			partModelToDMSObj.GUID = partId;
 			partModelToDMSArray.add(partModelToDMSObj);
 
@@ -1553,7 +1618,6 @@ public class SPLM_Integration_JPO_mxJPO {
 				PartModelToERP partModelToERPObj = new PartModelToERP();
 				partModelToERPObj.PART_NO = partName;
 				partModelToERPObj.MODEL_SERISE = msStr;
-				partModelToERPObj.CHANGE_DATE = convertDateFormat(modifiedDate, "yyyyMMdd");
 				partModelToERPObj.GUID = partId;
 				partModelToERPArray.add(partModelToERPObj);
 			}
