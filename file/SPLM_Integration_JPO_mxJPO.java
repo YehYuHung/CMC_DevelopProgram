@@ -7,11 +7,11 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
@@ -26,12 +26,12 @@ import com.google.gson.reflect.TypeToken;
 import com.matrixone.apps.domain.DomainConstants;
 import com.matrixone.apps.domain.DomainObject;
 import com.matrixone.apps.domain.DomainRelationship;
-import com.matrixone.apps.domain.util.FrameworkException;
 import com.matrixone.apps.domain.util.MapList;
 import com.matrixone.apps.domain.util.MqlUtil;
 import com.matrixone.apps.domain.util.i18nNow;
 
 import matrix.db.Context;
+import matrix.util.Pattern;
 import matrix.util.StringList;
 import mc_style.functions.soap.sap.document.sap_com.YMM20_PortType;
 import mc_style.functions.soap.sap.document.sap_com.YMM20_ServiceLocator;
@@ -73,7 +73,8 @@ public class SPLM_Integration_JPO_mxJPO {
 	private final static String DEFAULT_ROOT_DIRECTORY = "C:\\temp\\Morga\\";
 	private final static String CALL_WSDL = "ERP";
 	private final static String PLM_ENV = System.getenv("PLM_ENV");
-	private final static short SEARCH_AMOUT = 5;
+	private final static String VAULT = "eService Production";
+	private final static short SEARCH_AMOUT = 0;
 	private final static int LIMIT_NUMS_DMS = 30;
 	private final static String ERP_YSD041_300 = "ERP.YSD041.300";
 	private final static String ERP_YSD041_310 = "ERP.YSD041.310";
@@ -82,8 +83,6 @@ public class SPLM_Integration_JPO_mxJPO {
 	private final static String ERP_YPP16_300 = "ERP.YPP16.300";
 	private final static String ERP_YPP16_310 = "ERP.YPP16.310";
 	private final static String DMS = "DMS";
-	private static final String TEMP_FOLDER = "PLMTemp";
-	private static final String TEMP_FOLDER_DEVICE = "D:\\";
 	private static final String SPLIT_STR = ",";
 
 	/* Get URL web */
@@ -126,7 +125,7 @@ public class SPLM_Integration_JPO_mxJPO {
 		return url;
 	}
 
-	/* --- create/modify Part Send SO To ERP/DMS --- */
+	/* ---create/modify Part Send SO To ERP/DMS--- */
 	public void ReleasePart(Context context, String[] args) throws Exception {
 		StringList busSelect = new StringList();
 		busSelect.add(DomainConstants.SELECT_ID);
@@ -136,98 +135,98 @@ public class SPLM_Integration_JPO_mxJPO {
 				"*", // name
 				"*", // revision
 				"*", // owner
-				"eService Production", // vault
+				VAULT, // vault
 				"current=='Complete' && attribute[SPLM_SendToERP_DMS]=='Processing'", // where
 				null, false, new StringList(DomainConstants.SELECT_ID), (short) SEARCH_AMOUT);
 
-		DomainObject domObj = new DomainObject();
-		for (Object object : soMapList) {
-			String SOId = (String) ((Map) object).get(DomainConstants.SELECT_ID);
-			domObj.setId(SOId);
+		DomainObject soObj = new DomainObject();
+		for (Object so : soMapList) {
+			String soId = (String) ((Map) so).get(DomainConstants.SELECT_ID);
+			soObj.setId(soId);
 
-			this._searchServicePart(context, this.getSOAI(context, domObj, getServicePartSelects()), "so");
-			this._searchOptAltPart(context, this.getSOAI(context, domObj, getAltOptPartSelects()), "alt");
-			this._searchOptAltPart(context, this.getSOAI(context, domObj, getAltOptPartSelects()), "opt");
-			this._searchPartVendor(context, this.getSOAI(context, domObj, getVendorSelects()));
+			this._searchServicePart(context, this.getSOIsServicePartAI(context, soObj, getServicePartSelects()), "so");
+			this._searchOptAltPart(context, this.getSOIsServicePartAI(context, soObj, getAltOptPartSelects()), "alt");
+			this._searchOptAltPart(context, this.getSOIsServicePartAI(context, soObj, getAltOptPartSelects()), "opt");
+			this._searchPartVendor(context, this.getSOIsServicePartAI(context, soObj, getVendorSelects()));
+			this._searchMRP_BOM(context, soObj);
 
-			domObj.setAttributeValue(context, "SPLM_SendToERP_DMS", "Complete");
+			soObj.setAttributeValue(context, "SPLM_SendToERP_DMS", "Complete");
 		}
 		System.out.println("*********************SO Sending Done.**************************");
 	}
 
-	/* --- only search Part then Call itSelf method for DMS/ERP --- */
-	private void searchServicePart(Context context, String[] args) throws Exception {
-		StringList busSelect = getServicePartSelects();
-		MapList partMapList = DomainObject.findObjects(context, "SPLM_Part", // type
+	/* ---only search Part then Call itSelf method for DMS/ERP--- */
+	public void searchServicePart(Context context, String[] args) throws Exception {
+		String WhereSelect = "current=='Release' && attribute[SPLM_ServicePart_DMS]=='Wait' && attribute[SPLM_ServicePart_ERP300]=='Wait' && attribute[SPLM_ServicePart_ERP310]=='Wait'"; // where
+		StringList busSelects = getServicePartSelects();
+
+		MapList partMapList = DomainObject.findObjects(context, "SPLM_Part,SPLM_ColorPart", // type
 				"*", // name
 				"*", // revision
 				"*", // owner
-				"eService Production", // vault
-				"current=='Release' && (attribute[SPLM_ServicePart_DMS]=='Wait' || attribute[SPLM_ServicePart_ERP300]=='Wait' || attribute[SPLM_ServicePart_ERP310]=='Wait') ", // where
-				null, false, busSelect, (short) SEARCH_AMOUT);
-
+				VAULT, // vault
+				WhereSelect, // where
+				null, false, busSelects, (short) SEARCH_AMOUT);
+		
 		this._searchServicePart(context, partMapList, "normal");
 	}
 
-	private void searchOptAltPart(Context context, String[] args) throws Exception {
+	public void searchOptAltPart(Context context, String[] args) throws Exception {
 		String strAltOpt = args[0]; // "alt", "opt"
+		String WhereSelect = "from[SPLM_RelatedOptionalPart]==TRUE"; // where
+		StringList busSelects = getAltOptPartSelects();
 
-		StringList busSelect = getAltOptPartSelects();
-		MapList partMapList = DomainObject.findObjects(context, "SPLM_Part", // type
+		MapList partMapList = DomainObject.findObjects(context, "SPLM_Part,SPLM_ColorPart", // type
 				"*", // name
 				"*", // revision
 				"*", // owner
-				"eService Production", // vault
-				"from[SPLM_RelatedOptionalPart]==TRUE", // where
-				null, false, busSelect, (short) (SEARCH_AMOUT * 2));
+				VAULT, // vault
+				WhereSelect, // where
+				null, false, busSelects, (short) SEARCH_AMOUT);
 
 		this._searchOptAltPart(context, partMapList, strAltOpt);
 	}
 
-	private void searchPartVendor(Context context, String[] args) throws Exception {
-		StringList busSelect = getVendorSelects();
-		MapList partMapList = DomainObject.findObjects(context, "SPLM_Part", // type
+	public void searchPartVendor(Context context, String[] args) throws Exception {
+		String WhereSelect = "from[SPLM_RelatedVendor].attribute[SPLM_Valid]==Y"; // where
+		StringList busSelects = getVendorSelects();
+
+		MapList partMapList = DomainObject.findObjects(context, "SPLM_Part,SPLM_ColorPart", // type
 				"*", // name
 				"*", // revision
 				"*", // owner
-				"eService Production", // vault
-				"from[SPLM_RelatedVendor].attribute[SPLM_Valid]==Y", // where
-				null, false, busSelect, (short) SEARCH_AMOUT);
+				VAULT, // vault
+				WhereSelect, // where
+				null, false, busSelects, (short) SEARCH_AMOUT);
 
 		this._searchPartVendor(context, partMapList);
 	}
-	
-	/* --- Dassault API package simple using--- */
-	private MapList getSOAI(Context context, DomainObject soObj, StringList busSelect) throws Exception {
-		MapList soPart = _getSOAI(context, soObj, busSelect, "SPLM_Part");
-		soPart.addAll(_getSOAI(context, soObj, busSelect, "SPLM_ColorPart"));
-		return soPart;
+
+	/* ---Dassault API package simple using--- */
+
+	private MapList getSOHaveSubPartAI(Context context, DomainObject soObj, StringList busSelect) throws Exception {
+		return getSOAI(context, soObj, busSelect, "attribute[SPLM_HaveSubPart]=='True'");
 	}
-	
-	private MapList _getSOAI(Context context, DomainObject soObj, StringList busSelect, String typePattern) throws Exception {
+
+	private MapList getSOIsServicePartAI(Context context, DomainObject soObj, StringList busSelect) throws Exception {
+		return getSOAI(context, soObj, busSelect, "attribute[SPLM_IsServicePart]=='True'");
+	}
+
+	private MapList getSOAI(Context context, DomainObject soObj, StringList busSelect, String objectWhere)
+			throws Exception {
 		return soObj.getRelatedObjects(context, "SPLM_AffectedItem", // relationshipPattern,
-				typePattern, // typePattern,
+				"*", // typePattern,
 				busSelect, // StringList objectSelects,
 				null, // StringList relationshipSelects,
 				false, // boolean getTo,
 				true, // boolean getFrom,
 				(short) 1, // short recurseToLevel,
-				"", // String objectWhere,
+				objectWhere, // String objectWhere,
 				"", // String relationshipWhere
 				0); // int limit)
 	}
 
-	private MapList findObjWithTypeWhereSelect(Context context,String typePattern ,StringList busSelect, String where ) throws Exception {
-		return DomainObject.findObjects(context, typePattern, // type
-				"*", // name
-				"*", // revision
-				"*", // owner
-				"eService Production", // vault
-				where, // where
-				null, false, busSelect, (short)SEARCH_AMOUT);
-	}
-
-	/* --- Business Select Management--- */
+	/* ---Business Select Management--- */
 	private StringList getServicePartSelects() {
 		StringList busSelect = new StringList();
 		busSelect.add(DomainConstants.SELECT_ID); // GUID
@@ -359,13 +358,6 @@ public class SPLM_Integration_JPO_mxJPO {
 		return sdf.format(d);
 	}
 
-	private static String getTempFolderPath() throws Exception {
-		if (new File(TEMP_FOLDER_DEVICE).exists()) {
-			return TEMP_FOLDER_DEVICE + TEMP_FOLDER;
-		}
-		return "C:\\" + TEMP_FOLDER;
-	}
-
 	private void outputDataFile(String fileName, String dataStr) throws IOException {
 		File dataFile = new File(DEFAULT_ROOT_DIRECTORY + fileName);
 		File dataRootFile = new File(DEFAULT_ROOT_DIRECTORY);
@@ -411,20 +403,10 @@ public class SPLM_Integration_JPO_mxJPO {
 		protected String CHANGE_DATE = convertNowDateFormat("yyyyMMdd");
 		protected String CREATE_DATE;
 		protected String GUID;
-		protected String ERP_EXPORT_STATUS;
-		protected String DMS_EXPORT_STATUS;
 		protected String PLANT;
 
 		protected void setPLANT(String plant) {
 			this.PLANT = plant;
-		}
-
-		protected void setERP_EXPORT_STATUS(String exportStatus) {
-			this.ERP_EXPORT_STATUS = exportStatus;
-		}
-
-		protected void setDMS_EXPORT_STATUS(String exportStatus) {
-			this.DMS_EXPORT_STATUS = exportStatus;
 		}
 
 		@Override
@@ -432,15 +414,13 @@ public class SPLM_Integration_JPO_mxJPO {
 			Object cloneObj = super.clone();
 			return cloneObj;
 		}
-
-		protected String getGUID() {
-			return this.GUID;
-		}
 	}
 
 	/* ---Test Part--- */
 	public void test(Context context, String[] args) throws Exception {
-		searchMRP_BOM(context, args);
+		Pattern pattern = new Pattern("");
+		pattern.addPattern(CALL_WSDL);
+		pattern.addPattern("asdf");
 	}
 
 	/* ---Start Line : API--- */
@@ -459,15 +439,13 @@ public class SPLM_Integration_JPO_mxJPO {
 		busSelects.add("attribute[SPLM_Name_TC]");
 		busSelects.add("attribute[SPLM_Name_EN]");
 		busSelects.add("attribute[SPLM_CommissionGroup]");
-		busSelects.add("attribute[SPLM_PNC_ERP]"); // Flag
 
 		MapList pncMapList = DomainObject.findObjects(context, "SPLM_PNC", // type
 				"*", // name
 				"-", // revision
 				"*", // owner
-				"eService Production", // vault
-				"attribute[SPLM_PNC_DMS]=='Wait' || attribute[SPLM_PNC_ERP]=='Wait'", // where
-//				"", // where
+				VAULT, // vault
+				"attribute[SPLM_PNC_DMS]=='Wait' && attribute[SPLM_PNC_ERP]=='Wait'", // where
 				null, false, busSelects, (short) SEARCH_AMOUT);
 
 		ArrayList<PNCForBoth> pncForBothArray = new ArrayList<PNCForBoth>();
@@ -480,57 +458,57 @@ public class SPLM_Integration_JPO_mxJPO {
 			pncForBothObj.PNC_NAME_C = (String) pncMap.get("attribute[SPLM_Name_TC]");
 			pncForBothObj.PNC_NAME_E = (String) pncMap.get("attribute[SPLM_Name_EN]");
 			pncForBothObj.PNC_TYPE = (String) pncMap.get("attribute[SPLM_CommissionGroup]");
-			pncForBothObj.ERP_EXPORT_STATUS = (String) pncMap.get("attribute[SPLM_PNC_ERP]");
 			pncForBothObj.GUID = (String) pncMap.get(DomainConstants.SELECT_ID);
 			pncForBothArray.add(pncForBothObj);
 		}
 
-		List<PNCForBoth> pncForERP = pncForBothArray.stream()
-				.filter(obj -> obj.ERP_EXPORT_STATUS.equalsIgnoreCase("Wait"))
-				.sorted(Comparator.comparing(PNCForBoth::getGUID)).collect(Collectors.toList());
-
-		List<PNCForBoth> pncForDMS = pncForBothArray.stream().sorted(Comparator.comparing(PNCForBoth::getGUID))
-				.limit(LIMIT_NUMS_DMS).collect(Collectors.toList());
-
-		pncForBothArray.stream().forEach(obj -> obj.setERP_EXPORT_STATUS(null));
-
 		DomainObject pncDomObj = new DomainObject();
+		String methodName = new Object(){}.getClass().getEnclosingMethod().getName();
 
 		// connect CMC for test
 		try {
-			if (pncForDMS.size() > 0) {
-//			if (CALL_WSDL.equalsIgnoreCase("DMS")) {
-				outputDataFile("16_DMS_PNC.txt", translateJsonIntoString(pncForDMS));
+			if (pncForBothArray.size() > 0) {
 				SPlmWSSoap dms = getSPlmWSSoapDMS();
-				String result = dms.PNC(translateJsonIntoString(pncForDMS));
-				System.out.println('\n' + result + '\n');
+				String result = dms.PNC(translateJsonIntoString(pncForBothArray));
+				outputDataFile("16_DMS_PNC.txt", translateJsonIntoString(pncForBothArray));
+				System.out.println('\n' + DMS + " " + methodName + " Result :" + result + '\n');
 
 				MqlUtil.mqlCommand(context, "trigger off");
-				for (PNCForBoth pncObj : pncForDMS) {
+				for (PNCForBoth pncObj : pncForBothArray) {
 					pncDomObj.setId(pncObj.GUID);
 					pncDomObj.setAttributeValue(context, "SPLM_PNC_DMS", "Complete");
 				}
 				MqlUtil.mqlCommand(context, "trigger on");
+			} else {
+				System.out.println('\n' + DMS + " " + methodName + " Data : " + pncForBothArray + " (\u4e0d\u62cb\u8f49\u8cc7\u6599)");
 			}
+		} catch (Exception e) {
+			String error = DMS + " " + methodName + " error : " + e.getMessage();
+			System.err.println(error);
+			outputDataFile("Error.txt", error);
+		}
 
-			if (pncForERP.size() > 0) {
-//			if (CALL_WSDL.equalsIgnoreCase("ERP")) {
-				outputDataFile("16_ERP_PNC.txt", translateJsonIntoString(pncForERP));
+		try {
+			if (pncForBothArray.size() > 0) {
 				YSD041_NEW_PortType erp = getYSD041_300ERP();
-				String result = erp.YPutSplmP01(translateJsonIntoString(pncForERP));
-				System.out.println('\n' + result + '\n');
+				String result = erp.YPutSplmP01(translateJsonIntoString(pncForBothArray));
+				outputDataFile("16_ERP_PNC.txt", translateJsonIntoString(pncForBothArray));
+				System.out.println('\n' + ERP_YSD041_300 + " " + methodName + " Result :" + result + '\n');
+				
 				MqlUtil.mqlCommand(context, "trigger off");
-				for (PNCForBoth pncObj : pncForERP) {
+				for (PNCForBoth pncObj : pncForBothArray) {
 					pncDomObj.setId(pncObj.GUID);
 					pncDomObj.setAttributeValue(context, "SPLM_PNC_ERP", "Complete");
 				}
 				MqlUtil.mqlCommand(context, "trigger on");
+			} else {
+				System.out.println('\n' + ERP_YSD041_300 + " " + methodName + " Data : " + pncForBothArray + " (\u4e0d\u62cb\u8f49\u8cc7\u6599)");
 			}
 		} catch (Exception e) {
-			String error = "searchPnc error : " + e.getMessage();
+			String error = ERP_YSD041_300 + " " + methodName + " error : " + e.getMessage();
+			System.err.println(error);
 			outputDataFile("Error.txt", error);
 		}
-
 	}
 
 	private class PNCForBoth extends Abstract_CMC_ObjBaseAttribute {
@@ -554,14 +532,13 @@ public class SPLM_Integration_JPO_mxJPO {
 		busSelects.add(DomainConstants.SELECT_ID);
 		busSelects.add("attribute[SPLM_Name_TC]");
 		busSelects.add("attribute[SPLM_Name_EN]");
-		busSelects.add("attribute[SPLM_GroupCode_ERP]"); // Flag
 
 		MapList groupCodeMapList = DomainObject.findObjects(context, "SPLM_GroupCode", // type
 				"*", // name
 				"*", // revision
 				"*", // owner
-				"eService Production", // vault
-				"attribute[SPLM_GroupCode_DMS]=='Wait' || attribute[SPLM_GroupCode_ERP]=='Wait'", // where
+				VAULT, // vault
+				"attribute[SPLM_GroupCode_DMS]=='Wait' && attribute[SPLM_GroupCode_ERP]=='Wait'", // where
 				null, false, busSelects, (short) SEARCH_AMOUT);
 
 		ArrayList<GroupCodeForBoth> groupCodeForBothArray = new ArrayList<GroupCodeForBoth>();
@@ -573,55 +550,55 @@ public class SPLM_Integration_JPO_mxJPO {
 			groupCodeForBothObj.GROUP_CODE = (String) groupCodeMap.get(DomainConstants.SELECT_NAME);
 			groupCodeForBothObj.GROUP_NAME_C = (String) groupCodeMap.get("attribute[SPLM_Name_TC]");
 			groupCodeForBothObj.GROUP_NAME_E = (String) groupCodeMap.get("attribute[SPLM_Name_EN]");
-			groupCodeForBothObj.ERP_EXPORT_STATUS = (String) groupCodeMap.get("attribute[SPLM_GroupCode_ERP]");
 			groupCodeForBothObj.GUID = (String) groupCodeMap.get(DomainConstants.SELECT_ID);
 			groupCodeForBothArray.add(groupCodeForBothObj);
 		}
 
-		List<GroupCodeForBoth> groupForERP = groupCodeForBothArray.stream()
-				.filter(obj -> obj.ERP_EXPORT_STATUS.equalsIgnoreCase("Wait"))
-				.sorted(Comparator.comparing(GroupCodeForBoth::getGUID)).collect(Collectors.toList());
-
-		List<GroupCodeForBoth> groupForDMS = groupCodeForBothArray.stream()
-				.sorted(Comparator.comparing(GroupCodeForBoth::getGUID)).limit(LIMIT_NUMS_DMS)
-				.collect(Collectors.toList());
-
-		groupCodeForBothArray.stream().forEach(obj -> obj.setERP_EXPORT_STATUS(null));
-
 		DomainObject groupDomObj = new DomainObject();
+		String methodName = new Object(){}.getClass().getEnclosingMethod().getName();
+
 		// connect CMC for test
 		try {
-			if (groupForDMS.size() > 0) {
-//			if (CALL_WSDL.equalsIgnoreCase("DMS")) {
-				outputDataFile("17_DMS_Group.txt", translateJsonIntoString(groupForDMS));
+			if (groupCodeForBothArray.size() > 0) {
 				SPlmWSSoap dms = getSPlmWSSoapDMS();
-				String result = dms.group(translateJsonIntoString(groupForDMS));
-				System.out.println('\n' + result + '\n');
+				String result = dms.group(translateJsonIntoString(groupCodeForBothArray));
+				outputDataFile("17_DMS_Group.txt", translateJsonIntoString(groupCodeForBothArray));
+				System.out.println('\n' + DMS + " " + methodName + " Result :" + result + '\n');
 
 				MqlUtil.mqlCommand(context, "trigger off");
-				for (GroupCodeForBoth groupObj : groupForDMS) {
+				for (GroupCodeForBoth groupObj : groupCodeForBothArray) {
 					groupDomObj.setId(groupObj.GUID);
 					groupDomObj.setAttributeValue(context, "SPLM_GroupCode_DMS", "Complete");
 				}
 				MqlUtil.mqlCommand(context, "trigger on");
+			} else {
+				System.out.println('\n' + DMS + " " + methodName + " Data : " + groupCodeForBothArray + " (\u4e0d\u62cb\u8f49\u8cc7\u6599)");
 			}
+		} catch (Exception e) {
+			String error = DMS + " " + methodName + " error : " + e.getMessage();
+			System.err.println(error);
+			outputDataFile("Error.txt", error);
+		}
 
-			if (groupForERP.size() > 0) {
-//			if (CALL_WSDL.equalsIgnoreCase("ERP")) {
-				outputDataFile("17_ERP_Group.txt", translateJsonIntoString(groupForERP));
+		try {
+			if (groupCodeForBothArray.size() > 0) {
 				YSD041_NEW_PortType erp = getYSD041_300ERP();
-				String result = erp.YPutSplmG01(translateJsonIntoString(groupForERP));
-				System.out.println('\n' + result + '\n');
+				String result = erp.YPutSplmG01(translateJsonIntoString(groupCodeForBothArray));
+				outputDataFile("17_ERP_Group.txt", translateJsonIntoString(groupCodeForBothArray));
+				System.out.println('\n' + ERP_YSD041_300 + " " + methodName + " Result :" + result + '\n');
 
 				MqlUtil.mqlCommand(context, "trigger off");
-				for (GroupCodeForBoth groupObj : groupForERP) {
+				for (GroupCodeForBoth groupObj : groupCodeForBothArray) {
 					groupDomObj.setId(groupObj.GUID);
 					groupDomObj.setAttributeValue(context, "SPLM_GroupCode_ERP", "Complete");
 				}
 				MqlUtil.mqlCommand(context, "trigger on");
+			} else {
+				System.out.println('\n' + ERP_YSD041_300 + " " + methodName + " Data : " + groupCodeForBothArray + " (\u4e0d\u62cb\u8f49\u8cc7\u6599)");
 			}
 		} catch (Exception e) {
-			String error = "searchGroupCode error : " + e.getMessage();
+			String error = ERP_YSD041_300 + " " + methodName + " error : " + e.getMessage();
+			System.err.println(error);
 			outputDataFile("Error.txt", error);
 		}
 	}
@@ -640,7 +617,6 @@ public class SPLM_Integration_JPO_mxJPO {
 	 * @throws Exception
 	 */
 	private void _searchPartVendor(Context context, MapList partMapList) throws Exception {
-
 		StringList relatedBusSelects = new StringList();
 		relatedBusSelects.add("current.actual");
 		relatedBusSelects.add(DomainConstants.SELECT_NAME);
@@ -668,9 +644,6 @@ public class SPLM_Integration_JPO_mxJPO {
 					"attribute[SPLM_Valid]==Y", // String relationshipWhere
 					0); // int limit)
 
-//			StringList partAttVendorList = new StringList();
-//			vendorMapList.stream()
-//					.forEach(vendor -> partAttVendorList.add((String) ((Map) vendor).get(DomainConstants.SELECT_NAME)));
 			List<String> partAttVendorList = (List<String>) vendorMapList.stream()
 					.map(vendor -> (String) ((Map) vendor).get(DomainConstants.SELECT_NAME))
 					.collect(Collectors.toList());
@@ -722,30 +695,60 @@ public class SPLM_Integration_JPO_mxJPO {
 				.filter(obj -> obj.LOCATION.equals("9000") || obj.LOCATION.equals("9001")).collect(Collectors.toList());
 		venderAlterToERPArray.stream().forEach(obj -> obj.LOCATION = null);
 
-		// connect CMC for test
+		String methodName = new Object() {
+		}.getClass().getEnclosingMethod().getName();
+		DomainObject pncDomObj = new DomainObject();
 		try {
-//		if (CALL_WSDL.equalsIgnoreCase("DMS")) {
 			if (venderAlterToDMSArray.size() > 0) {
-				outputDataFile("19_DMS_PartVendor.txt", translateJsonIntoString(venderAlterToDMSArray));
 				SPlmWSSoap dms = getSPlmWSSoapDMS();
 				String result = dms.partVendor(translateJsonIntoString(venderAlterToDMSArray));
-				System.out.println('\n' + result + '\n');
-			}
-//		if (CALL_WSDL.equalsIgnoreCase("ERP")) {
-			if (partVendorListToERPForCMC.size() > 0) {
-				outputDataFile("19_ERP_PartVendor_CMC.txt", translateJsonIntoString(partVendorListToERPForCMC));
-				YSD041_NEW_PortType erp = getYSD041_300ERP();
-				String resultERP = erp.YPutSplmM02(translateJsonIntoString(partVendorListToERPForCMC));
-				System.out.println('\n' + resultERP + '\n');
-			}
-			if (partVendorListToERPForSDM.size() > 0) {
-				outputDataFile("19_ERP_PartVendor_SDM.txt", translateJsonIntoString(partVendorListToERPForSDM));
-				YSD041_NEW_PortType erp = getYSD041_310ERP();
-				String resultERP = erp.YPutSplmM02(translateJsonIntoString(partVendorListToERPForSDM));
-				System.out.println('\n' + resultERP + '\n');
+				outputDataFile("19_DMS_PartVendor.txt", translateJsonIntoString(venderAlterToDMSArray));
+				System.out.println('\n' + DMS + " " + methodName + " Result :" + result + '\n');
+				MqlUtil.mqlCommand(context, "trigger off");
+				for (VenderAlterToDMS pncObj : venderAlterToDMSArray) {
+					pncDomObj.setId(pncObj.GUID);
+					pncDomObj.setAttributeValue(context, "SPLM_PNC_DMS", "Complete");
+				}
+				MqlUtil.mqlCommand(context, "trigger on");
+			} else {
+				System.out.println('\n' + DMS + " " + methodName + " Data : " + venderAlterToDMSArray
+						+ " (\u4e0d\u62cb\u8f49\u8cc7\u6599)");
 			}
 		} catch (Exception e) {
-			String error = "searchPartVendor error : " + e.getMessage();
+			String error = DMS + " " + methodName + " error : " + e.getMessage();
+			System.err.println(error);
+			outputDataFile("Error.txt", error);
+		}
+
+		try {
+			if (partVendorListToERPForCMC.size() > 0) {
+				YSD041_NEW_PortType erp = getYSD041_300ERP();
+				String result = erp.YPutSplmM02(translateJsonIntoString(partVendorListToERPForCMC));
+				outputDataFile("19_ERP_PartVendor_CMC.txt", translateJsonIntoString(partVendorListToERPForCMC));
+				System.out.println('\n' + ERP_YSD041_300 + " " + methodName + " Result :" + result + '\n');
+			} else {
+				System.out.println('\n' + ERP_YSD041_300 + " " + methodName + " Data : " + partVendorListToERPForCMC
+						+ " (\u4e0d\u62cb\u8f49\u8cc7\u6599)");
+			}
+		} catch (Exception e) {
+			String error = ERP_YSD041_300 + " " + methodName + " error : " + e.getMessage();
+			System.err.println(error);
+			outputDataFile("Error.txt", error);
+		}
+
+		try {
+			if (partVendorListToERPForSDM.size() > 0) {
+				YSD041_NEW_PortType erp = getYSD041_310ERP();
+				String result = erp.YPutSplmM02(translateJsonIntoString(partVendorListToERPForSDM));
+				outputDataFile("19_ERP_PartVendor_SDM.txt", translateJsonIntoString(partVendorListToERPForSDM));
+				System.out.println('\n' + ERP_YSD041_310 + " " + methodName + " Result :" + result + '\n');
+			} else {
+				System.out.println('\n' + ERP_YSD041_310 + " " + methodName + " Data : " + partVendorListToERPForSDM
+						+ " (\u4e0d\u62cb\u8f49\u8cc7\u6599)");
+			}
+		} catch (Exception e) {
+			String error = ERP_YSD041_310 + " " + methodName + " error : " + e.getMessage();
+			System.err.println(error);
 			outputDataFile("Error.txt", error);
 		}
 	}
@@ -847,52 +850,74 @@ public class SPLM_Integration_JPO_mxJPO {
 
 		OptAltToERPArray.stream().forEach(obj -> obj.setLOCATION(null));
 
+		String methodName = new Object() {
+		}.getClass().getEnclosingMethod().getName() + "_" + strAltOpt;
+		DomainObject partDomObj = new DomainObject();
 		// connect CMC for test
-		try {
-//			if (CALL_WSDL.equalsIgnoreCase("DMS")) {
-			if (strAltOpt.equalsIgnoreCase("ALT")) {
+		if (strAltOpt.equalsIgnoreCase("ALT")) {
+			try {
 				if (OptAltToDMSArray.size() > 0) {
-					outputDataFile("14_DMS_Alter.txt", translateJsonIntoString(OptAltToDMSArray));
 					SPlmWSSoap dms = getSPlmWSSoapDMS();
 					String result = dms.partAlt(translateJsonIntoString(OptAltToDMSArray));
-					System.out.println('\n' + result + '\n');
+					outputDataFile("14_DMS_Alter.txt", translateJsonIntoString(OptAltToDMSArray));
+					System.out.println('\n' + DMS + " " + methodName + " Result :" + result + '\n');
+				} else {
+					System.out.println('\n' + DMS + " " + methodName + " Data : " + OptAltToDMSArray
+							+ " (\u4e0d\u62cb\u8f49\u8cc7\u6599)");
 				}
+			} catch (Exception e) {
+				String error = DMS + " " + methodName + " error : " + e.getMessage();
+				System.err.println(error);
+				outputDataFile("Error.txt", error);
+			}
+			try {
 				if (AlterPartToERPArrayForCMC.size() > 0) {
-					outputDataFile("14_ERP_Alter_ToCMC.txt", translateJsonIntoString(AlterPartToERPArrayForCMC));
 					YMM20_PortType erpForCMC = getYMM20_300ERP();
-					String resultCMC = erpForCMC.ymmReplaceMatToSap(translateJsonIntoString(AlterPartToERPArrayForCMC));
-					System.out.println('\n' + resultCMC + '\n');
+					String result = erpForCMC.ymmReplaceMatToSap(translateJsonIntoString(AlterPartToERPArrayForCMC));
+					outputDataFile("14_ERP_Alter_ToCMC.txt", translateJsonIntoString(AlterPartToERPArrayForCMC));
+					System.out.println('\n' + ERP_YMM20_300 + " " + methodName + " Result :" + result + '\n');
+				} else {
+					System.out.println('\n' + ERP_YMM20_300 + " " + methodName + " Data : " + AlterPartToERPArrayForCMC
+							+ " (\u4e0d\u62cb\u8f49\u8cc7\u6599)");
 				}
+			} catch (Exception e) {
+				String error = ERP_YMM20_300 + " " + methodName + " error : " + e.getMessage();
+				System.err.println(error);
+				outputDataFile("Error.txt", error);
+			}
+			try {
 				if (AlterPartToERPArrayForSDM.size() > 0) {
-					outputDataFile("14_ERP_Alter_ToSDM.txt", translateJsonIntoString(AlterPartToERPArrayForSDM));
 					YMM20_PortType erpForSDM = getYMM20_310ERP();
-					String resultSDM = erpForSDM.ymmReplaceMatToSap(translateJsonIntoString(AlterPartToERPArrayForSDM));
-					System.out.println('\n' + resultSDM + '\n');
+					String result = erpForSDM.ymmReplaceMatToSap(translateJsonIntoString(AlterPartToERPArrayForSDM));
+					outputDataFile("14_ERP_Alter_ToSDM.txt", translateJsonIntoString(AlterPartToERPArrayForSDM));
+					System.out.println('\n' + ERP_YMM20_310 + " " + methodName + " Result :" + result + '\n');
+				} else {
+					System.out.println('\n' + ERP_YMM20_310 + " " + methodName + " Data : " + AlterPartToERPArrayForSDM
+							+ " (\u4e0d\u62cb\u8f49\u8cc7\u6599)");
 				}
+			} catch (Exception e) {
+				String error = ERP_YMM20_310 + " " + methodName + " error : " + e.getMessage();
+				System.err.println(error);
+				outputDataFile("Error.txt", error);
+			}
+		}
 
-			} else if (strAltOpt.equalsIgnoreCase("OPT")) {
+		if (strAltOpt.equalsIgnoreCase("OPT")) {
+			try {
 				if (OptAltToDMSArray.size() > 0) {
-					outputDataFile("15_DMS_Optional.txt", translateJsonIntoString(OptAltToDMSArray));
 					SPlmWSSoap dms = getSPlmWSSoapDMS();
 					String result = dms.partOpt(translateJsonIntoString(OptAltToDMSArray));
-					System.out.println('\n' + result + '\n');
+					outputDataFile("15_DMS_Optional.txt", translateJsonIntoString(OptAltToDMSArray));
+					System.out.println('\n' + DMS + " " + methodName + " Result :" + result + '\n');
+				} else {
+					System.out.println('\n' + DMS + " " + methodName + " Data : " + OptAltToDMSArray
+							+ " (\u4e0d\u62cb\u8f49\u8cc7\u6599)");
 				}
+			} catch (Exception e) {
+				String error = DMS + " " + methodName + " error : " + e.getMessage();
+				System.err.println(error);
+				outputDataFile("Error.txt", error);
 			}
-//				outputDataFile("15_ERP_Optional.txt", translateJsonIntoString(OptionalPartToERPArray));
-//			if (CALL_WSDL.equalsIgnoreCase("ERP")) {
-//				outputDataFile("14_ERP_Alter_ToCMC.txt", translateJsonIntoString(AlterPartToERPArrayForCMC));
-//				YMM20_PortType erpForCMC = getYMM20_300ERP();
-//				String resultCMC = erpForCMC.ymmReplaceMatToSap(translateJsonIntoString(AlterPartToERPArrayForCMC));
-//				System.out.println('\n' + resultCMC + '\n');
-//				outputDataFile("14_ERP_Alter_ToSDM.txt", translateJsonIntoString(AlterPartToERPArrayForSDM));
-//				YMM20_PortType erpForSDM = getYMM20_310ERP();
-//				String resultSDM = erpForSDM.ymmReplaceMatToSap(translateJsonIntoString(AlterPartToERPArrayForSDM));
-//				System.out.println('\n' + resultSDM + '\n');
-//			}
-		} catch (Exception e) {
-			System.err.println("Error detail in Error.txt.");
-			String error = "searchOptAltPart error : " + e.getMessage();
-			outputDataFile("Error.txt", error);
 		}
 
 	}
@@ -993,14 +1018,15 @@ public class SPLM_Integration_JPO_mxJPO {
 		busSelects.add(DomainConstants.SELECT_ID);
 		busSelects.add(DomainConstants.SELECT_NAME);
 		busSelects.add("attribute[SPLM_Location]");
-		busSelects.add("attribute[SPLM_PartPNC_ERP300]");
 
-		MapList partMapList = DomainObject.findObjects(context, "SPLM_Part", // type
+		String WhereSelect = "current=='Release' && to[SPLM_RelatedPart].from[SPLM_PNC]!='' && attribute[SPLM_PartPNC_DMS]=='Wait' && attribute[SPLM_PartPNC_ERP310]=='Wait' && attribute[SPLM_PartPNC_ERP300]=='Wait'"; // where
+
+		MapList partMapList = DomainObject.findObjects(context, "SPLM_Part,SPLM_ColorPart", // type
 				"*", // name
 				"*", // revision
 				"*", // owner
-				"eService Production", // vault
-				"current=='Release' && to[SPLM_RelatedPart].from[SPLM_PNC]!='' && (attribute[SPLM_PartPNC_DMS]=='Wait' || attribute[SPLM_PartPNC_ERP310]=='Wait' || attribute[SPLM_PartPNC_ERP300]=='Wait')", // where
+				VAULT, // vault
+				WhereSelect, // where
 				null, false, busSelects, (short) SEARCH_AMOUT);
 
 		DomainObject domObj = new DomainObject();
@@ -1012,7 +1038,6 @@ public class SPLM_Integration_JPO_mxJPO {
 			String partId = (String) partMap.get(DomainConstants.SELECT_ID);
 			String partName = (String) partMap.get(DomainConstants.SELECT_NAME);
 			String partAttLocationForERP = (String) partMap.get("attribute[SPLM_Location]");
-			String erpStatus = (String) partMap.get("attribute[SPLM_PartPNC_ERP300]");
 
 			domObj.setId(partId);
 			StringList pncNameList = domObj.getInfoList(context, "to[SPLM_RelatedPart].from[SPLM_PNC].name");
@@ -1033,73 +1058,91 @@ public class SPLM_Integration_JPO_mxJPO {
 						partPncToERPObj.PART_NO = partName;
 						partPncToERPObj.PNC_NO = pncName;
 						partPncToERPObj.PLANT = partLocation;
-						System.out.println("partLocation " + partLocation);
-						partPncToERPObj.ERP_EXPORT_STATUS = erpStatus;
 						partPncToERPObj.GUID = partId;
 						partPncToERPArray.add(partPncToERPObj);
 					}
 				}
 			}
 		}
-		List<PartPncToDMS> partPncForDMSLimitArray = partPncToDMSArray.stream()
-				.sorted(Comparator.comparing(PartPncToDMS::getGUID)).limit(LIMIT_NUMS_DMS).collect(Collectors.toList());
 
-		List<PartPncToERP> partPncToERPFilterList = partPncToERPArray.stream()
-				.filter(obj -> obj.ERP_EXPORT_STATUS.equalsIgnoreCase("Wait")).collect(Collectors.toList());
-
-		List<PartPncToERP> partPncToERPForCMCArray = partPncToERPFilterList.stream()
-				.filter(obj -> obj.PLANT.equals("1300")).collect(Collectors.toList());
-		List<PartPncToERP> partPncToERPForSDMArray = partPncToERPFilterList.stream()
+		List<PartPncToERP> partPncToERPForCMCArray = partPncToERPArray.stream().filter(obj -> obj.PLANT.equals("1300"))
+				.collect(Collectors.toList());
+		List<PartPncToERP> partPncToERPForSDMArray = partPncToERPArray.stream()
 				.filter(obj -> obj.PLANT.equals("9000") || obj.PLANT.equals("9001")).collect(Collectors.toList());
 
-		partPncToERPArray.stream().forEach(obj -> {
-			obj.setPLANT(null);
-			obj.setERP_EXPORT_STATUS(null);
-		});
+		partPncToERPArray.stream().forEach(obj -> obj.setPLANT(null));
 
 		DomainObject partPncDomObj = new DomainObject();
+		String methodName = new Object() {
+		}.getClass().getEnclosingMethod().getName();
+
 		// connect CMC for test
 		try {
-//			if (CALL_WSDL.equalsIgnoreCase("DMS")) {
-			if (partPncForDMSLimitArray.size() > 0) {
-				outputDataFile("11_DMS_Part-PNC.txt", translateJsonIntoString(partPncForDMSLimitArray));
+			if (partPncToDMSArray.size() > 0) {
 				SPlmWSSoap dms = getSPlmWSSoapDMS();
-				String result = dms.partPnc(translateJsonIntoString(partPncForDMSLimitArray));
-				System.out.println('\n' + result + '\n');
+				String result = dms.partPnc(translateJsonIntoString(partPncToDMSArray));
+				outputDataFile("11_DMS_Part-PNC.txt", translateJsonIntoString(partPncToDMSArray));
+				System.out.println('\n' + DMS + " " + methodName + " Result :" + result + '\n');
 
 				MqlUtil.mqlCommand(context, "trigger off");
-				for (PartPncToDMS partPncObj : partPncForDMSLimitArray) {
+				for (PartPncToDMS partPncObj : partPncToDMSArray) {
+					
 					partPncDomObj.setId(partPncObj.GUID);
 					partPncDomObj.setAttributeValue(context, "SPLM_PartPNC_DMS", "Complete");
 				}
 				MqlUtil.mqlCommand(context, "trigger on");
+			} else {
+				System.out.println('\n' + DMS + " " + methodName + " Data : " + partPncToDMSArray
+						+ " (\u4e0d\u62cb\u8f49\u8cc7\u6599)");
 			}
+		} catch (Exception e) {
+			String error = DMS + " " + methodName + " error : " + e.getMessage();
+			System.err.println(error);
+			outputDataFile("Error.txt", error);
+		}
 
-//			if (CALL_WSDL.equalsIgnoreCase("ERP")) {
+		try {
 			if (partPncToERPForCMCArray.size() > 0) {
-				outputDataFile("11_ERP_Part-PNC_ToCMC.txt", translateJsonIntoString(partPncToERPForCMCArray));
 				YSD041_NEW_PortType erp = getYSD041_300ERP();
 				String result = erp.YPutSplmM03(translateJsonIntoString(partPncToERPForCMCArray));
-				System.out.println('\n' + result + '\n');
+				outputDataFile("11_ERP_Part-PNC_ToCMC.txt", translateJsonIntoString(partPncToERPForCMCArray));
+				System.out.println('\n' + ERP_YSD041_300 + " " + methodName + " Result :" + result + '\n');
+
+				MqlUtil.mqlCommand(context, "trigger off");
+				for (PartPncToERP partPncObj : partPncToERPForCMCArray) {
+					partPncDomObj.setId(partPncObj.GUID);
+					partPncDomObj.setAttributeValue(context, "SPLM_PartPNC_ERP300", "Complete");
+				}
+				MqlUtil.mqlCommand(context, "trigger on");
+			} else {
+				System.out.println('\n' + ERP_YSD041_300 + " " + methodName + " Data : " + partPncToERPForCMCArray
+						+ " (\u4e0d\u62cb\u8f49\u8cc7\u6599)");
 			}
+		} catch (Exception e) {
+			String error = ERP_YSD041_300 + " " + methodName + " error : " + e.getMessage();
+			System.err.println(error);
+			outputDataFile("Error.txt", error);
+		}
+		try {
 			if (partPncToERPForSDMArray.size() > 0) {
-				outputDataFile("11_ERP_Part-PNC_ToSDM.txt", translateJsonIntoString(partPncToERPForSDMArray));
 				YSD041_NEW_PortType erp = getYSD041_310ERP();
 				String result = erp.YPutSplmM03(translateJsonIntoString(partPncToERPForSDMArray));
-				System.out.println('\n' + result + '\n');
-			}
+				outputDataFile("11_ERP_Part-PNC_ToSDM.txt", translateJsonIntoString(partPncToERPForSDMArray));
+				System.out.println('\n' + ERP_YSD041_310 + " " + methodName + " Result :" + result + '\n');
 
-			MqlUtil.mqlCommand(context, "trigger off");
-			for (PartPncToERP partPncObj : partPncToERPFilterList) {
-				partPncDomObj.setId(partPncObj.GUID);
-				partPncDomObj.setAttributeValue(context, "SPLM_PartPNC_ERP300", "Complete");
-				partPncDomObj.setAttributeValue(context, "SPLM_PartPNC_ERP310", "Complete");
+				MqlUtil.mqlCommand(context, "trigger off");
+				for (PartPncToERP partPncObj : partPncToERPForSDMArray) {
+					partPncDomObj.setId(partPncObj.GUID);
+					partPncDomObj.setAttributeValue(context, "SPLM_PartPNC_ERP310", "Complete");
+				}
+				MqlUtil.mqlCommand(context, "trigger on");
+			} else {
+				System.out.println('\n' + ERP_YSD041_310 + " " + methodName + " Data : " + partPncToERPForSDMArray
+						+ " (\u4e0d\u62cb\u8f49\u8cc7\u6599)");
 			}
-			MqlUtil.mqlCommand(context, "trigger on");
-
 		} catch (Exception e) {
-			System.err.println("Error detail in Error.txt.");
-			String error = "Part_No : " + partPncToDMSArray.get(0).PART_NO + "\n" + e.getMessage();
+			String error = ERP_YSD041_310 + " " + methodName + " error : " + e.getMessage();
+			System.err.println(error);
 			outputDataFile("Error.txt", error);
 		}
 	}
@@ -1127,12 +1170,15 @@ public class SPLM_Integration_JPO_mxJPO {
 		busSelects.add(DomainConstants.SELECT_ID);
 		busSelects.add(DomainConstants.SELECT_NAME);
 
-		MapList partMapList = DomainObject.findObjects(context, "SPLM_Part", // type
+		// find Object
+		String WhereSelect = "current=='Release' && to[SPLM_RelatedPart].from[SPLM_GroupDrawing]!='' && attribute[SPLM_PartGroupCode_DMS]=='Wait'"; // where
+
+		MapList partMapList = DomainObject.findObjects(context, "SPLM_Part,SPLM_ColorPart", // type
 				"*", // name
 				"*", // revision
 				"*", // owner
-				"eService Production", // vault
-				"current=='Release' && to[SPLM_RelatedPart]==TRUE && attribute[SPLM_PartGroupCode_DMS]=='Wait'", // where
+				VAULT, // vault
+				WhereSelect, // where
 				null, false, busSelects, (short) SEARCH_AMOUT);
 
 		DomainObject domObj = new DomainObject();
@@ -1158,30 +1204,35 @@ public class SPLM_Integration_JPO_mxJPO {
 			}
 		}
 
-		List<PartGroupCodeToDMS> partGroupCodeForDMSLimitArray = partGroupCodeToDMSArray.stream()
-				.sorted(Comparator.comparing(PartGroupCodeToDMS::getGUID)).limit(LIMIT_NUMS_DMS)
-				.collect(Collectors.toList());
+//		List<PartGroupCodeToDMS> partGroupCodeForDMSLimitArray = partGroupCodeToDMSArray.stream()
+//				.sorted(Comparator.comparing(PartGroupCodeToDMS::getGUID)).limit(LIMIT_NUMS_DMS)
+//				.collect(Collectors.toList());
 
 		DomainObject partGroupCodeDomObj = new DomainObject();
+		String methodName = new Object() {
+		}.getClass().getEnclosingMethod().getName();
+
 		// connect CMC for test
 		try {
-			if (partGroupCodeForDMSLimitArray.size() > 0) {
-//			if (CALL_WSDL.equalsIgnoreCase("DMS")) {
-				outputDataFile("12_DMS_Part-Group.txt", translateJsonIntoString(partGroupCodeForDMSLimitArray));
+			if (partGroupCodeToDMSArray.size() > 0) {
 				SPlmWSSoap dms = getSPlmWSSoapDMS();
-				String result = dms.partGroup(translateJsonIntoString(partGroupCodeForDMSLimitArray));
-				System.out.println('\n' + result + '\n');
+				String result = dms.partGroup(translateJsonIntoString(partGroupCodeToDMSArray));
+				outputDataFile("12_DMS_Part-Group.txt", translateJsonIntoString(partGroupCodeToDMSArray));
+				System.out.println('\n' + DMS + " " + methodName + " Result :" + result + '\n');
 
 				MqlUtil.mqlCommand(context, "trigger off");
-				for (PartGroupCodeToDMS partGroupCodeObj : partGroupCodeForDMSLimitArray) {
+				for (PartGroupCodeToDMS partGroupCodeObj : partGroupCodeToDMSArray) {
 					partGroupCodeDomObj.setId(partGroupCodeObj.GUID);
 					partGroupCodeDomObj.setAttributeValue(context, "SPLM_PartGroupCode_DMS", "Complete");
 				}
 				MqlUtil.mqlCommand(context, "trigger on");
+			} else {
+				System.out.println('\n' + DMS + " " + methodName + " Data : " + partGroupCodeToDMSArray
+						+ " (\u4e0d\u62cb\u8f49\u8cc7\u6599)");
 			}
 		} catch (Exception e) {
-			System.err.println("Error detail in Error.txt.");
-			String error = "Part_No : " + partGroupCodeToDMSArray.get(0).PART_NO + "\n" + e.getMessage();
+			String error = DMS + " " + methodName + " error : " + e.getMessage();
+			System.err.println(error);
 			outputDataFile("Error.txt", error);
 		}
 	}
@@ -1202,14 +1253,13 @@ public class SPLM_Integration_JPO_mxJPO {
 	public void searchGroupPnc(Context context, String[] args) throws Exception {
 		StringList busSelects = new StringList();
 		busSelects.add(DomainConstants.SELECT_ID);
-		busSelects.add(DomainConstants.SELECT_MODIFIED); // CHANGE_DATE
 		busSelects.add("attribute[SPLM_GroupCode]");
 
 		MapList groupDrawingMapList = DomainObject.findObjects(context, "SPLM_GroupDrawing", // type
 				"*", // name
 				"*", // revision
 				"*", // owner
-				"eService Production", // vault
+				VAULT, // vault
 				"from[SPLM_Related_PNC]==TRUE", // where
 				null, false, busSelects, (short) SEARCH_AMOUT);
 
@@ -1219,7 +1269,6 @@ public class SPLM_Integration_JPO_mxJPO {
 		for (Object groupDrawingObj : groupDrawingMapList) {
 			Map groupDrawingMap = (Map) groupDrawingObj;
 			String groupDrawingId = (String) groupDrawingMap.get(DomainConstants.SELECT_ID);
-			String groupDrawingModifiedDate = (String) groupDrawingMap.get(DomainConstants.SELECT_MODIFIED);
 			String groupDrawingAttGroupCode = (String) groupDrawingMap.get("attribute[SPLM_GroupCode]");
 			domObj.setId(groupDrawingId);
 			StringList pncNameList = domObj.getInfoList(context, "from[SPLM_Related_PNC].to[SPLM_PNC].name");
@@ -1228,7 +1277,7 @@ public class SPLM_Integration_JPO_mxJPO {
 					groupDrawingAttGroupCode, // name
 					"*", // revision
 					"*", // owner
-					"eService Production", // vault
+					VAULT, // vault
 					null, // where
 					null, false, new StringList(DomainConstants.SELECT_ID), (short) 1);
 
@@ -1270,10 +1319,10 @@ public class SPLM_Integration_JPO_mxJPO {
 	 * 
 	 * @param context
 	 * @param partList
-	 * @param SoNormal
+	 * @param triggerFrom
 	 * @throws Exception
 	 */
-	private void _searchServicePart(Context context, MapList partList, String SoNormal) throws Exception {
+	private void _searchServicePart(Context context, MapList partList, String triggerFrom) throws Exception {
 		StringList busSelectSO = new StringList();
 		busSelectSO.add(DomainConstants.SELECT_NAME);
 		busSelectSO.add("current.actual");
@@ -1285,15 +1334,14 @@ public class SPLM_Integration_JPO_mxJPO {
 		String exportSoLocation = "Export Item";
 
 		DomainObject domObj = new DomainObject();
-		ArrayList<Part> partArrayToDMS = new ArrayList<Part>();
-		ArrayList<Part> partArrayToERP = new ArrayList<Part>();
+		List<Part> partListToDMS = new ArrayList<Part>();
+		List<Part> partArrayToERP = new ArrayList<Part>();
 
 		for (Object partObj : partList) {
 			Map partMap = (Map) partObj;
 			String partId = (String) partMap.get(DomainConstants.SELECT_ID);
 
 			domObj.setId(partId);
-//			StringList pncList = domObj.getInfoList(context, "to[SPLM_RelatedPart].from[SPLM_PNC].name");
 			StringList groupCodeList = domObj.getInfoList(context,
 					"to[SPLM_RelatedPart].from[SPLM_GroupDrawing].attribute[SPLM_GroupCode]");
 			String partAttMaterialGroup = (String) partMap.get("attribute[SPLM_MaterialGroup]");
@@ -1303,8 +1351,6 @@ public class SPLM_Integration_JPO_mxJPO {
 			String partAttMs = (String) partMap.get("attribute[SPLM_ModelSeries]");
 			String partAttMc = (String) partMap.get("attribute[SPLM_CMC_Code]");
 			String partAttPNCType = (String) partMap.get("attribute[SPLM_CommissionGroup]");
-			String erpStatus = (String) partMap.get("attribute[SPLM_ServicePart_ERP300]");
-			String dmsStatus = (String) partMap.get("attribute[SPLM_ServicePart_DMS]");
 			String attTransGroup = "";
 			String attSoLatestName = "";
 			String attSoLatestDate = "";
@@ -1325,10 +1371,6 @@ public class SPLM_Integration_JPO_mxJPO {
 					"", // String objectWhere,
 					"attribute[SPLM_Valid]==Y", // String relationshipWhere
 					0); // int limit)
-
-//			StringList partAttVendorList = new StringList();
-//			vendorMapList.stream()
-//					.forEach(vendor -> partAttVendorList.add((String) ((Map) vendor).get(DomainConstants.SELECT_NAME)));
 
 			List<String> partAttVendorList = (List<String>) vendorMapList.stream()
 					.map(vendor -> (String) ((Map) vendor).get(DomainConstants.SELECT_NAME))
@@ -1423,7 +1465,7 @@ public class SPLM_Integration_JPO_mxJPO {
 						msName, // name
 						"*", // revision
 						"*", // owner
-						"eService Production", // vault
+						VAULT, // vault
 						"", // where
 						null, false, new StringList("attribute[SPLM_Vehicles]"), (short) 0);
 				for (Object msObj : msList) {
@@ -1471,7 +1513,6 @@ public class SPLM_Integration_JPO_mxJPO {
 				part.PART_NAME_E = (String) partMap.get("attribute[SPLM_Name_EN]");
 				part.SALES_ORG = partLocation.equals("1300") ? "3000"
 						: partLocation.equals("9001") ? "9000" : partLocation.equals("9000") ? "SDM" : "";
-//				part.PNC_NO = pncList.isEmpty() ? "" : pncList.get(0);
 				part.PNC_NO = (String) partMap.get("attribute[SPLM_PNC]");
 				part.ITEM_CATEGORY_GROUP = attItemCategoryGroup;
 				part.MODEL_SERIES = partAttMsArray.isEmpty() ? "" : partAttMsArray.get(0);
@@ -1497,124 +1538,139 @@ public class SPLM_Integration_JPO_mxJPO {
 						"yyyyMMdd");
 				part.GUID = partId;
 
-//			} else if (CALL_WSDL.equalsIgnoreCase("ERP")) {
 				part.MATERIAL_GROUP = partAttMaterialGroup;
 				part.PLANT = partLocation;
-				part.ERP_EXPORT_STATUS = erpStatus;
 				partArrayToERP.add(part);
-//			}
-//				if (CALL_WSDL.equalsIgnoreCase("DMS") && part.EXPORT_PART.equalsIgnoreCase("N")) {
-				if (part.EXPORT_PART.equalsIgnoreCase("N")) {
+//				if (part.EXPORT_PART.equalsIgnoreCase("N")) {
+				if ( !partAttLocationForDMS.isEmpty() ) {
 					Part partDMS = (Part) part.clone();
 					partDMS.MATERIAL_GROUP = (partAttMaterialGroup.equalsIgnoreCase("KD")
 							|| partAttMaterialGroup.equalsIgnoreCase("KDY")) ? "K" : "D";
 					partDMS.PLANT = partAttLocationForDMS;
-					partDMS.setERP_EXPORT_STATUS(null);
-					partDMS.DMS_EXPORT_STATUS = dmsStatus;
-					partArrayToDMS.add(partDMS);
+					partListToDMS.add(partDMS);
 				}
 			}
 		}
-
-		List<Part> partForDMSLimitArray = partArrayToDMS.stream().sorted(Comparator.comparing(Part::getGUID))
-				.filter(part -> part.DMS_EXPORT_STATUS.equalsIgnoreCase("Wait")).limit(LIMIT_NUMS_DMS)
-				.collect(Collectors.toList());
-
-		List<Part> partForERPFilterArray = partArrayToERP.stream().sorted(Comparator.comparing(Part::getGUID))
-				.filter(part -> part.ERP_EXPORT_STATUS.equalsIgnoreCase("Wait")).collect(Collectors.toList());
-
-		List<Part> partListForERPToCMCFilterArray = new ArrayList<Part>();
-		List<Part> partListForERPToSDMFilterArray = new ArrayList<Part>();
-		if (partForERPFilterArray.size() > 0) {
-			partListForERPToCMCFilterArray = partForERPFilterArray.stream().filter(part -> part.PLANT.equals("1300"))
-					.collect(Collectors.toList());
-			partListForERPToSDMFilterArray = partForERPFilterArray.stream()
-					.filter(part -> part.PLANT.equals("9000") || part.PLANT.equals("9001"))
-					.collect(Collectors.toList());
-		}
-
-		partArrayToDMS.stream().forEach(part -> part.setDMS_EXPORT_STATUS(null));
-		partArrayToERP.stream().forEach(part -> part.setERP_EXPORT_STATUS(null));
 
 		// SO repackage
 		List<Part> partListToERPForCMC = partArrayToERP.stream().filter(part -> part.PLANT.equals("1300"))
 				.collect(Collectors.toList());
 		List<Part> partListToERPForSDM = partArrayToERP.stream()
 				.filter(part -> part.PLANT.equals("9000") || part.PLANT.equals("9001")).collect(Collectors.toList());
-
+		
 		DomainObject partDomObj = new DomainObject();
 
+		String dmsFileName = "8_DMS_" + triggerFrom + "_ServicePart.txt";
+		String erp300FileName = "8_ERP_" + triggerFrom + "_ServicePart_CMC.txt";
+		String erp310FileName = "8_ERP_" + triggerFrom + "_ServicePart_SDM.txt";
+		String methodName = new Object() {}.getClass().getEnclosingMethod().getName();
+
+//		// If PLANT == "" then set Flag Complete
+//		MqlUtil.mqlCommand(context, "trigger off");
+//		for (Part partObj : partArrayToERP) {
+//			partDomObj.setId(partObj.GUID);
+//			if (triggerFrom.equalsIgnoreCase("so")) {
+//				partDomObj.setAttributeValue(context, "SPLM_DMS_Sync", "True");
+//				partDomObj.setAttributeValue(context, "SPLM_ERP1300_Sync", "True");
+//				partDomObj.setAttributeValue(context, "SPLM_ERP9000_Sync", "True");
+//				partDomObj.setAttributeValue(context, "SPLM_ERP9001_Sync", "True");
+//			} else {
+//				partDomObj.setAttributeValue(context, "SPLM_ServicePart_DMS", "Complete");
+//				partDomObj.setAttributeValue(context, "SPLM_ServicePart_ERP300", "Complete");
+//				partDomObj.setAttributeValue(context, "SPLM_ServicePart_ERP310", "Complete");
+//			}
+//		}
+//		MqlUtil.mqlCommand(context, "trigger on");
+
+		
 		// connect CMC for test
 		try {
-			// Send SO part
-			if (SoNormal.equalsIgnoreCase("so")) {
-				if (partArrayToDMS.size() > 0) {
-					outputDataFile("8_DMS_ReleasePart_ServicePart.txt", translateJsonIntoString(partArrayToDMS));
-					SPlmWSSoap dms = getSPlmWSSoapDMS();
-					String result = dms.servicesPart(translateJsonIntoString(partArrayToDMS));
-					System.out.println('\n' + result + '\n');
-				}
-				if (partListToERPForCMC.size() > 0) {
-					outputDataFile("8_ERP_ReleasePart_ServicePart_CMC.txt",
-							translateJsonIntoString(partListToERPForCMC));
-					YMM20_PortType erpForCMC = getYMM20_300ERP();
-					String result = erpForCMC.ymmSplmMatToSap(translateJsonIntoString(partListToERPForCMC));
-					System.out.println('\n' + result + '\n');
-				}
-				if (partListToERPForSDM.size() > 0) {
-					outputDataFile("8_ERP_ReleasePart_ServicePart_SDM.txt",
-							translateJsonIntoString(partListToERPForSDM));
-					YMM20_PortType erpForSDM = getYMM20_310ERP();
-					String result = erpForSDM.ymmSplmMatToSap(translateJsonIntoString(partListToERPForSDM));
-					System.out.println('\n' + result + '\n');
-				}
-			}
-
-			// only Modify Send , no rel with SO
-			if (SoNormal.equalsIgnoreCase("normal")) {
-				if (partForDMSLimitArray.size() > 0) {
-					outputDataFile("8_DMS_ServicePart.txt", translateJsonIntoString(partForDMSLimitArray));
-					SPlmWSSoap dms = getSPlmWSSoapDMS();
-					String result = dms.servicesPart(translateJsonIntoString(partForDMSLimitArray));
-					System.out.println('\n' + result + '\n');
-
-					MqlUtil.mqlCommand(context, "trigger off");
-					for (Part partObj : partForDMSLimitArray) {
-						partDomObj.setId(partObj.GUID);
-						partDomObj.setAttributeValue(context, "SPLM_ServicePart_DMS", "Complete");
-					}
-					MqlUtil.mqlCommand(context, "trigger on");
-				}
-
-				if (partListForERPToCMCFilterArray.size() > 0) {
-					outputDataFile("8_ERP_ServicePart_CMC.txt",
-							translateJsonIntoString(partListForERPToCMCFilterArray));
-					YMM20_PortType erpForCMC = getYMM20_300ERP();
-					String result = erpForCMC.ymmSplmMatToSap(translateJsonIntoString(partListForERPToCMCFilterArray));
-					System.out.println('\n' + result + '\n');
-				}
-				if (partListForERPToSDMFilterArray.size() > 0) {
-					outputDataFile("8_ERP_ServicePart_SDM.txt",
-							translateJsonIntoString(partListForERPToSDMFilterArray));
-					YMM20_PortType erpForSDM = getYMM20_310ERP();
-					String result = erpForSDM.ymmSplmMatToSap(translateJsonIntoString(partListForERPToSDMFilterArray));
-					System.out.println('\n' + result + '\n');
-				}
+			if (partListToDMS.size() > 0) {
+				SPlmWSSoap dms = getSPlmWSSoapDMS();
+				String result = dms.servicesPart(translateJsonIntoString(partListToDMS));
+				outputDataFile(dmsFileName, translateJsonIntoString(partListToDMS));
+				System.out.println('\n' + DMS + " " + methodName + "_" + triggerFrom + " Result :" + result + '\n');
 
 				MqlUtil.mqlCommand(context, "trigger off");
-				for (Part partObj : partForERPFilterArray) {
+				for (Part partObj : partListToDMS) {
 					partDomObj.setId(partObj.GUID);
-					partDomObj.setAttributeValue(context, "SPLM_ServicePart_ERP310", "Complete");
-					partDomObj.setAttributeValue(context, "SPLM_ServicePart_ERP300", "Complete");
+					if (triggerFrom.equalsIgnoreCase("so")) {
+						partDomObj.setAttributeValue(context, "SPLM_DMS_Sync", "True");
+					} else {
+						partDomObj.setAttributeValue(context, "SPLM_ServicePart_DMS", "Complete");
+					}
 				}
 				MqlUtil.mqlCommand(context, "trigger on");
+			} else {
+				System.out.println('\n' + DMS + " " + methodName + "_" + triggerFrom + " Data : " + partListToDMS
+						+ " (\u4e0d\u62cb\u8f49\u8cc7\u6599)");
 			}
 		} catch (Exception e) {
-			System.err.println("Error detail in Error.txt.");
-			String error = "searchServicePart error : " + e.getMessage();
-			outputDataFile("Error.txt", error);
+			String error = DMS + " " + methodName + "_" + triggerFrom + " error : " + e.getMessage();
+			System.err.println(error);
+			outputDataFile("Error" + dmsFileName, error);
 		}
 
+		try {
+			if (partListToERPForCMC.size() > 0) {
+				YMM20_PortType erpForCMC = getYMM20_300ERP();
+				String result = erpForCMC.ymmSplmMatToSap(translateJsonIntoString(partListToERPForCMC));
+				outputDataFile(erp300FileName, translateJsonIntoString(partListToERPForCMC));
+				System.out.println(
+						'\n' + ERP_YMM20_300 + " " + methodName + "_" + triggerFrom + " Result :" + result + '\n');
+
+				MqlUtil.mqlCommand(context, "trigger off");
+				for (Part partObj : partListToERPForCMC) {
+					partDomObj.setId(partObj.GUID);
+					if (triggerFrom.equalsIgnoreCase("so")) {
+						partDomObj.setAttributeValue(context, "SPLM_ERP1300_Sync", "True");
+					} else {
+						partDomObj.setAttributeValue(context, "SPLM_ServicePart_ERP300", "Complete");
+					}
+				}
+				MqlUtil.mqlCommand(context, "trigger on");
+			} else {
+				System.out.println('\n' + ERP_YMM20_300 + " " + methodName + "_" + triggerFrom + " Data : "
+						+ partListToERPForCMC + " (\u4e0d\u62cb\u8f49\u8cc7\u6599)");
+			}
+		} catch (Exception e) {
+			String error = ERP_YMM20_300 + " " + methodName + "_" + triggerFrom + " error : " + e.getMessage();
+			System.err.println(error);
+			outputDataFile("Error" + erp300FileName, error);
+		}
+
+		try {
+			if (partListToERPForSDM.size() > 0) {
+				YMM20_PortType erpForSDM = getYMM20_310ERP();
+				String result = erpForSDM.ymmSplmMatToSap(translateJsonIntoString(partListToERPForSDM));
+				outputDataFile(erp310FileName, translateJsonIntoString(partListToERPForSDM));
+				System.out.println(
+						'\n' + ERP_YMM20_310 + " " + methodName + "_" + triggerFrom + " Result :" + result + '\n');
+
+				MqlUtil.mqlCommand(context, "trigger off");
+				for (Part partObj : partListToERPForSDM) {
+					partDomObj.setId(partObj.GUID);
+					String erpLocation = partObj.PLANT;
+					if (triggerFrom.equalsIgnoreCase("so")) {
+						if(partObj.PLANT.equals(9000)) {							
+							partDomObj.setAttributeValue(context, "SPLM_ERP9000_Sync", "True");
+						} else {							
+							partDomObj.setAttributeValue(context, "SPLM_ERP9001_Sync", "True");
+						}
+					} else {
+						partDomObj.setAttributeValue(context, "SPLM_ServicePart_ERP310", "Complete");
+					}
+				}
+				MqlUtil.mqlCommand(context, "trigger on");
+			} else {
+				System.out.println('\n' + ERP_YMM20_310 + " " + methodName + "_" + triggerFrom + " Data : "
+						+ partListToERPForSDM + " (\u4e0d\u62cb\u8f49\u8cc7\u6599)");
+			}
+		} catch (Exception e) {
+			String error = ERP_YMM20_310 + " " + methodName + "_" + triggerFrom + " error : " + e.getMessage();
+			System.err.println(error);
+			outputDataFile("Error" + erp310FileName, error);
+		}
 	}
 
 	private class Part extends Abstract_CMC_ObjBaseAttribute {
@@ -1667,7 +1723,7 @@ public class SPLM_Integration_JPO_mxJPO {
 				"*", // name
 				"*", // revision
 				"*", // owner
-				"eService Production", // vault
+				VAULT, // vault
 				"to[SPLM_SBOM]==TRUE", // where
 				null, false, busSelects, (short) SEARCH_AMOUT);
 
@@ -1731,7 +1787,7 @@ public class SPLM_Integration_JPO_mxJPO {
 				"*", // name
 				"*", // revision
 				"*", // owner
-				"eService Production", // vault
+				VAULT, // vault
 				"from[SPLM_SBOM]==TRUE", // where
 				null, false, busSelects, (short) SEARCH_AMOUT);
 
@@ -1806,7 +1862,7 @@ public class SPLM_Integration_JPO_mxJPO {
 				"*", // name
 				"*", // revision
 				"*", // owner
-				"eService Production", // vault
+				VAULT, // vault
 				"to[SPLM_RelatedPartsCatalogue]==TRUE", // where
 				null, false, busSelects, (short) SEARCH_AMOUT);
 
@@ -1874,87 +1930,76 @@ public class SPLM_Integration_JPO_mxJPO {
 		StringList busSelects = new StringList();
 		busSelects.add(DomainConstants.SELECT_ID);
 		busSelects.add(DomainConstants.SELECT_NAME);
-		busSelects.add(DomainConstants.SELECT_MODIFIED);
 		busSelects.add("attribute[SPLM_CMC_Code]");
 		busSelects.add("attribute[SPLM_ModelSeries]");
-//		String where = "";
-//		if (CALL_WSDL.equalsIgnoreCase("DMS")) {
-		String where = "current=='Release' && attribute[SPLM_CMC_Code]!='' && attribute[SPLM_PartModel_DMS]=='Wait'";
-//		}
-//		if (CALL_WSDL.equalsIgnoreCase("ERP")) {
-//			where = "attribute[SPLM_ModelSeries]!=''";
-//		}
 
-		MapList partMapList = DomainObject.findObjects(context, "SPLM_Part", // type
+		String WhereSelect = "current=='Release' && attribute[SPLM_CMC_Code]!='' && attribute[SPLM_PartModel_DMS]=='Wait'";
+		MapList partMapList = DomainObject.findObjects(context, "SPLM_Part,SPLM_ColorPart", // type
 				"*", // name
 				"*", // revision
 				"*", // owner
-				"eService Production", // vault
-				where, // where
+				VAULT, // vault
+				WhereSelect, // where
 				null, false, busSelects, (short) SEARCH_AMOUT);
 
 		ArrayList<PartModelToDMS> partModelToDMSArray = new ArrayList<PartModelToDMS>();
-		ArrayList<PartModelToERP> partModelToERPArray = new ArrayList<PartModelToERP>();
 
 		for (Object obj : partMapList) {
 			Map partMap = (Map) obj;
 			String partName = (String) partMap.get(DomainConstants.SELECT_NAME);
 			String partId = (String) partMap.get(DomainConstants.SELECT_ID);
-			String modifiedDate = (String) partMap.get(DomainConstants.SELECT_MODIFIED);
 			String partAttMc = (String) partMap.get("attribute[SPLM_CMC_Code]");
 			String partAttMs = (String) partMap.get("attribute[SPLM_ModelSeries]");
 
 			ArrayList<String> partAttMcArray = new ArrayList<String>();
+			ArrayList<String> partAttMsArray = new ArrayList<String>();
 
 			// SPLM_CMC_Code data processing
 			for (String mcStr : partAttMc.split(SPLIT_STR)) {
 				partAttMcArray.add(mcStr);
+			}
+			
+			// SPLM_ModelSeries data processing
+			for (String msStr : partAttMs.split(SPLIT_STR)) {
+				partAttMsArray.add(msStr);
 			}
 
 			// json for DMS system
 			PartModelToDMS partModelToDMSObj = new PartModelToDMS();
 			partModelToDMSObj.PART_NO = partName;
 			partModelToDMSObj.MODEL_CODE = partAttMcArray;
+			partModelToDMSObj.MODEL_SERISE = partAttMsArray;
 			partModelToDMSObj.GUID = partId;
 			partModelToDMSArray.add(partModelToDMSObj);
-
-			// json for ERP system
-//			for (String msStr : partAttMs.split(SPLIT_STR)) {
-//				PartModelToERP partModelToERPObj = new PartModelToERP();
-//				partModelToERPObj.PART_NO = partName;
-//				partModelToERPObj.MODEL_SERISE = msStr;
-//				partModelToERPObj.GUID = partId;
-//				partModelToERPArray.add(partModelToERPObj);
-//			}
 		}
 
-		List<PartModelToDMS> partModelForDMS = partModelToDMSArray.stream().limit(LIMIT_NUMS_DMS)
-				.collect(Collectors.toList());
+//		List<PartModelToDMS> partModelForDMS = partModelToDMSArray.stream().limit(LIMIT_NUMS_DMS)
+//				.collect(Collectors.toList());
+
 		DomainObject partModelDomObj = new DomainObject();
+		String methodName = new Object() {
+		}.getClass().getEnclosingMethod().getName();
+
 		try {
-			if (partModelForDMS.size() > 0) {
-//			if (CALL_WSDL.equalsIgnoreCase("DMS")) {
-				outputDataFile("13_DMS_PartModel.txt", translateJsonIntoString(partModelForDMS));
+			if (partModelToDMSArray.size() > 0) {
 				SPlmWSSoap dms = getSPlmWSSoapDMS();
-				String result = dms.partModel(translateJsonIntoString(partModelForDMS));
-				System.out.println('\n' + result + '\n');
+				String result = dms.partModel(translateJsonIntoString(partModelToDMSArray));
+				outputDataFile("13_DMS_PartModel.txt", translateJsonIntoString(partModelToDMSArray));
+				System.out.println('\n' + DMS + " " + methodName + " Result :" + result + '\n');
 
 				MqlUtil.mqlCommand(context, "trigger off");
-				for (PartModelToDMS partModelObj : partModelForDMS) {
+				for (PartModelToDMS partModelObj : partModelToDMSArray) {
 					partModelDomObj.setId(partModelObj.GUID);
 					partModelDomObj.setAttributeValue(context, "SPLM_PartModel_DMS", "Complete");
 				}
 				MqlUtil.mqlCommand(context, "trigger on");
+			} else {
+				System.out.println('\n' + DMS + " " + methodName + " Data : " + partModelToDMSArray
+						+ " (\u4e0d\u62cb\u8f49\u8cc7\u6599)");
 			}
-//			if (CALL_WSDL.equalsIgnoreCase("ERP")) {
-//				outputDataFile("13_ERP_PartModel.txt", translateJsonIntoString(partModelToERPArray));
-//			SPlmWSSoap dms = getSPlmWSSoapDMS();
-//			String result = dms.PNC(translateJsonIntoString(partModelToERPArray));
-//			System.out.println('\n' + result + '\n');
-//			}
 		} catch (Exception e) {
-			System.err.println("Error detail in Error.txt.");
-			String error = "searchPartModel error : " + e.getMessage();
+			String error = DMS + " " + methodName + " error : " + e.getMessage();
+			System.err.println(error);
 			outputDataFile("Error.txt", error);
 		}
 
@@ -1963,12 +2008,7 @@ public class SPLM_Integration_JPO_mxJPO {
 	private class PartModelToDMS extends Abstract_CMC_ObjBaseAttribute {
 		public String PART_NO;
 		public ArrayList<String> MODEL_CODE;
-	}
-
-	private class PartModelToERP extends Abstract_CMC_ObjBaseAttribute {
-		public String PART_NO;
-		public String MODEL_CODE;
-		public String MODEL_SERISE;
+		public ArrayList<String> MODEL_SERISE;
 	}
 
 	/**
@@ -1986,7 +2026,7 @@ public class SPLM_Integration_JPO_mxJPO {
 			SPlmWSSoap locator = getSPlmWSSoapDMS();
 			dealerStr = locator.dealer();
 			String dealerType = "SPLM_Dealer";
-			String dealerVault = "eService Production";
+			String dealerVault = VAULT;
 			String dealerPolicy = "SPLM_Dealer";
 			ArrayList<Dealer> dealerArray = gson.fromJson(dealerStr, new TypeToken<ArrayList<Dealer>>() {
 			}.getType());
@@ -2092,7 +2132,7 @@ public class SPLM_Integration_JPO_mxJPO {
 			dealerStr = locator.doGetCust();
 
 			String dealerType = "SPLM_Dealer";
-			String dealerVault = "eService Production";
+			String dealerVault = VAULT;
 			String dealerPolicy = "SPLM_Dealer";
 			ArrayList<GLMDealer> dealerArray = gson.fromJson(dealerStr, new TypeToken<ArrayList<GLMDealer>>() {
 			}.getType());
@@ -2199,137 +2239,147 @@ public class SPLM_Integration_JPO_mxJPO {
 	 * @param args
 	 * @throws Exception
 	 */
-	public void searchMRP_BOM(Context context, String[] args) throws Exception {
+	private void _searchMRP_BOM(Context context, DomainObject soObj) throws Exception {
+		String affectedItemPartType = "SPLM_Part,SPLM_ColorPart";
 
-		StringList busSelects = new StringList();
-		busSelects.add(DomainConstants.SELECT_ID);
-		busSelects.add(DomainConstants.SELECT_NAME);
+		StringList affectedItemBusSelects = new StringList();
+		affectedItemBusSelects.add(DomainConstants.SELECT_ID);
+		affectedItemBusSelects.add(DomainConstants.SELECT_NAME);
+		affectedItemBusSelects.add("attribute[SPLM_Location]");
+		StringList affectedItemRelSelects = new StringList();
 
-		StringList busSelectsSoPart = new StringList();
-		busSelectsSoPart.add(DomainConstants.SELECT_ID);
-		busSelectsSoPart.add(DomainConstants.SELECT_NAME);
-		busSelectsSoPart.add("attribute[SPLM_Location]");
-		StringList relSelectsSoPart = new StringList();
+		StringList subPartBusSelects = new StringList();
+		subPartBusSelects.add(DomainConstants.SELECT_NAME);
+		StringList subPartRelSelects = new StringList();
+		subPartRelSelects.add("attribute[SPLM_EnableDate]"); // Start Date
+		subPartRelSelects.add("attribute[SPLM_DisableDate]"); // End Date
+		subPartRelSelects.add("attribute[SPLM_Materiel_KD_Type]");
+		subPartRelSelects.add("attribute[Quantity]");
 
-		StringList busSelectsSubPart = new StringList();
-		busSelectsSubPart.add(DomainConstants.SELECT_NAME);
-		StringList relSelectsSubPart = new StringList();
-		relSelectsSubPart.add("attribute[SPLM_EnableDate]"); // Start Date
-		relSelectsSubPart.add("attribute[SPLM_DisableDate]"); // End Date
-		relSelectsSubPart.add("attribute[SPLM_Materiel_KD_Type]");
-		relSelectsSubPart.add("attribute[Quantity]");
-
-		MapList soMapList = DomainObject.findObjects(context, "SPLM_SO", // type
-				"*", // name
-				"-", // revision
-				"*", // owner
-				"eService Production", // vault
-				"from[SPLM_AffectedItem].to[SPLM_Part].attribute[SPLM_HaveSubPart]==TRUE", // where
-				null, false, busSelects, (short) 0);
-
-		DomainObject domObj = new DomainObject();
-		DomainObject parentPartDomObj = new DomainObject();
+		DomainObject affectedItemObj = new DomainObject();
 		ArrayList<MRP_BOMToERP> mrpBOMToERPArray = new ArrayList<MRP_BOMToERP>();
-		String spiltStr = ",";
 
 		// check SPLM_SO->SPLM_Part rel[SPLM_AffectedItem].att[SPLM_HaveSubPart]==TRUE
-		for (Object obj : soMapList) {
-			Map soMap = (Map) obj;
-			String soName = (String) soMap.get(DomainConstants.SELECT_NAME);
-			String soId = (String) soMap.get(DomainConstants.SELECT_ID);
-			domObj.setId(soId);
 
-			MapList soPartMapList = domObj.getRelatedObjects(context, "SPLM_AffectedItem", // relationshipPattern,
-					"SPLM_Part", // typePattern,
-					busSelectsSoPart, // StringList objectSelects,
-					relSelectsSoPart, // StringList relationshipSelects,
+		String soName = soObj.getInfo(context, DomainConstants.SELECT_NAME);
+		String soId = soObj.getInfo(context, DomainConstants.SELECT_ID);
+
+		MapList soAffectedItemList = soObj.getRelatedObjects(context, "SPLM_AffectedItem", // relationshipPattern,
+				affectedItemPartType, // typePattern,
+				affectedItemBusSelects, // StringList objectSelects,
+				affectedItemRelSelects, // StringList relationshipSelects,
+				false, // boolean getTo,
+				true, // boolean getFrom,
+				(short) 1, // short recurseToLevel,
+				"attribute[SPLM_HaveSubPart]=='True'", // String objectWhere,
+				"", // String relationshipWhere
+				0); // int limit)
+
+		// parent Part
+		for (Object affectedItem : soAffectedItemList) {
+			Map affectedItemInfo = (Map) affectedItem;
+			String affectedItemName = (String) affectedItemInfo.get(DomainConstants.SELECT_NAME);
+			String affectedItemId = (String) affectedItemInfo.get(DomainConstants.SELECT_ID);
+			String affectedItemLocation = (String) affectedItemInfo.get("attribute[SPLM_Location]");
+			affectedItemObj.setId(affectedItemId);
+
+			MapList affectedItemVendorMapList = affectedItemObj.getRelatedObjects(context, "SPLM_RelatedVendor", // relationshipPattern,
+					"SPLM_Vendor", // typePattern,
+					new StringList(DomainConstants.SELECT_NAME), // StringList objectSelects,
+					null, // StringList relationshipSelects,
 					false, // boolean getTo,
 					true, // boolean getFrom,
 					(short) 1, // short recurseToLevel,
-					"attribute[SPLM_HaveSubPart]==TRUE", // String objectWhere,
-					"", // String relationshipWhere
+					"", // String objectWhere,
+					"attribute[SPLM_Valid]=='Y'", // String relationshipWhere
 					0); // int limit)
 
-			// parent Part
-			for (Object soPartObj : soPartMapList) {
-				Map soPartMap = (Map) soPartObj;
-				String parentPartName = (String) soPartMap.get(DomainConstants.SELECT_NAME);
-				String parentPartId = (String) soPartMap.get(DomainConstants.SELECT_ID);
-				String parentPartAttLocation = (String) soPartMap.get("attribute[SPLM_Location]");
-				parentPartDomObj.setId(parentPartId);
-				StringList parentPartVendorList = parentPartDomObj.getInfoList(context,
-						"from[SPLM_RelatedVendor].to[SPLM_Vendor].name");
+			Optional affectedItemVendorOptional = affectedItemVendorMapList.stream()
+					.map(obj -> (String) ((Map) obj).get(DomainConstants.SELECT_NAME)).findFirst();
+			String affectedItemVendor = (String) affectedItemVendorOptional.orElse("");
 
-				// sub Part
-				MapList subPartMapList = parentPartDomObj.getRelatedObjects(context, "SPLM_SBOM", // relationshipPattern,
-						"SPLM_Part", // typePattern,
-						busSelectsSubPart, // StringList objectSelects,
-						relSelectsSubPart, // StringList relationshipSelects,
-						false, // boolean getTo,
-						true, // boolean getFrom,
-						(short) 1, // short recurseToLevel,
-						"", // String objectWhere,
-						"attribute[SPLM_Materiel_KD_Type]=='D-'||attribute[SPLM_Materiel_KD_Type]=='K-'", // String
-																											// relationshipWhere
-						0); // int limit)
+			// sub Part
+			MapList subPartMapList = affectedItemObj.getRelatedObjects(context, "SPLM_SBOM", // relationshipPattern,
+					affectedItemPartType, // typePattern,
+					subPartBusSelects, // StringList objectSelects,
+					subPartRelSelects, // StringList relationshipSelects,
+					false, // boolean getTo,
+					true, // boolean getFrom,
+					(short) 1, // short recurseToLevel,
+					"", // String objectWhere,
+					"attribute[SPLM_Materiel_KD_Type]=='D-'||attribute[SPLM_Materiel_KD_Type]=='K-'", // String
+																										// relationshipWhere
+					0); // int limit)
 
-				for (Object subPartObj : subPartMapList) {
-					Map subPartMap = (Map) subPartObj;
-					String subPartAttStartDate = (String) subPartMap.get("attribute[SPLM_EnableDate]");
-					String subPartAttEndDate = (String) subPartMap.get("attribute[SPLM_DisableDate]");
+			for (Object subPartObj : subPartMapList) {
+				Map subPartMap = (Map) subPartObj;
+				String subPartAttStartDate = (String) subPartMap.get("attribute[SPLM_EnableDate]");
+				String subPartAttEndDate = (String) subPartMap.get("attribute[SPLM_DisableDate]");
 
-					// json for ERP system
-					try {
-						for (String location : parentPartAttLocation.split(spiltStr)) {
+				// json for ERP system
+				try {
+					for (String location : affectedItemLocation.split(SPLIT_STR)) {
 
-							MRP_BOMToERP mrpBOMToERP = new MRP_BOMToERP();
-							mrpBOMToERP.SO_NO = soName;
-							mrpBOMToERP.VENDOR_NO = parentPartVendorList.isEmpty() ? "" : parentPartVendorList.get(0);
-							mrpBOMToERP.PARENT_PART_NO = parentPartName;
-							mrpBOMToERP.PARENT_PART_PLANT = location;
-							mrpBOMToERP.CHILD_PART_NO = (String) subPartMap.get(DomainObject.SELECT_NAME);
-							mrpBOMToERP.QUANTITY = (String) subPartMap.get("attribute[Quantity]");
-							mrpBOMToERP.CHILD_PART_START_DATE = subPartAttStartDate.isEmpty() ? ""
-									: convertDateFormat(subPartAttStartDate, "yyyyMMdd");
-							mrpBOMToERP.CHILD_PART_END_DATE = subPartAttEndDate.isEmpty() ? ""
-									: convertDateFormat(subPartAttEndDate, "yyyyMMdd");
-							mrpBOMToERPArray.add(mrpBOMToERP);
-						}
-					} catch (Exception e) {
-						outputDataFile("Error.txt", e.getMessage() + "\nParent Part : " + parentPartName
-								+ "\nChild Part : " + (String) subPartMap.get(DomainObject.SELECT_NAME));
+						MRP_BOMToERP mrpBOMToERP = new MRP_BOMToERP();
+						mrpBOMToERP.SO_NO = soName;
+						mrpBOMToERP.VENDOR_NO = affectedItemVendor;
+						mrpBOMToERP.PARENT_PART_NO = affectedItemName;
+						mrpBOMToERP.PARENT_PART_PLANT = location;
+						mrpBOMToERP.CHILD_PART_NO = (String) subPartMap.get(DomainObject.SELECT_NAME);
+						mrpBOMToERP.QUANTITY = (String) subPartMap.get("attribute[Quantity]");
+						mrpBOMToERP.CHILD_PART_START_DATE = subPartAttStartDate.isEmpty() ? ""
+								: convertDateFormat(subPartAttStartDate, "yyyyMMdd");
+						mrpBOMToERP.CHILD_PART_END_DATE = subPartAttEndDate.isEmpty() ? ""
+								: convertDateFormat(subPartAttEndDate, "yyyyMMdd");
+						mrpBOMToERPArray.add(mrpBOMToERP);
 					}
+				} catch (Exception e) {
+					outputDataFile("Error.txt", e.getMessage() + "\nParent Part : " + affectedItemName
+							+ "\nChild Part : " + (String) subPartMap.get(DomainObject.SELECT_NAME));
 				}
 			}
 		}
 
+		DomainObject partDomObj = new DomainObject();
 		List<MRP_BOMToERP> mrpBOMToERPArrayForCMC = mrpBOMToERPArray.stream()
 				.filter(mrp -> mrp.PARENT_PART_PLANT.equals("1300")).collect(Collectors.toList());
 		List<MRP_BOMToERP> mrpBOMToERPArrayForSDM = mrpBOMToERPArray.stream()
 				.filter(mrp -> mrp.PARENT_PART_PLANT.equals("9000") || mrp.PARENT_PART_PLANT.equals("9001"))
 				.collect(Collectors.toList());
+		String methodName = new Object() {
+		}.getClass().getEnclosingMethod().getName();
 
 		// connect CMC for test
 		try {
-//			if (CALL_WSDL.equalsIgnoreCase("ERP")) {
-			outputDataFile("9.ERP_MRPBOM_ForCMC.txt", translateJsonIntoString(mrpBOMToERPArrayForCMC));
-			YPP16_PortType erpForCMC = getYPP16_300ERP();
-			String result = erpForCMC.yppSplmBomToSap(translateJsonIntoString(mrpBOMToERPArrayForCMC));
-			System.out.println('\n' + result + '\n');
-			outputDataFile("9.ERP_MRPBOM_ForSDM.txt", translateJsonIntoString(mrpBOMToERPArrayForSDM));
-			YPP16_PortType erpForSDM = getYPP16_310ERP();
-			result = erpForSDM.yppSplmBomToSap(translateJsonIntoString(mrpBOMToERPArrayForSDM));
-			System.out.println('\n' + result + '\n');
-//			}
+			if (mrpBOMToERPArrayForCMC.size() > 0) {
+				YPP16_PortType erpForCMC = getYPP16_300ERP();
+				String result = erpForCMC.yppSplmBomToSap(translateJsonIntoString(mrpBOMToERPArrayForCMC));
+				outputDataFile("9.ERP_MRPBOM_ForCMC.txt", translateJsonIntoString(mrpBOMToERPArrayForCMC));
+				System.out.println('\n' + ERP_YPP16_300 + " " + methodName + " Result :" + result + '\n');
+			} else {
+				System.out.println('\n' + ERP_YPP16_300 + " " + methodName + " Data : " + mrpBOMToERPArrayForCMC
+						+ " (\u4e0d\u62cb\u8f49\u8cc7\u6599)");
+			}
 
-			if (CALL_WSDL.equalsIgnoreCase("GLM")) {
-//			SPlmWSSoap dms = getSPlmWSSoapDMS();
-//			String result = dms.PNC(translateJsonIntoString(pncForBothArray));
-//			System.out.println(result);
+		} catch (Exception e) {
+			String error = ERP_YPP16_300 + " " + methodName + " error : " + e.getMessage();
+			System.err.println(error);
+			outputDataFile("Error.txt", error);
+		}
+
+		try {
+			if (mrpBOMToERPArrayForSDM.size() > 0) {
+				YPP16_PortType erpForSDM = getYPP16_310ERP();
+				String result = erpForSDM.yppSplmBomToSap(translateJsonIntoString(mrpBOMToERPArrayForSDM));
+				outputDataFile("9.ERP_MRPBOM_ForSDM.txt", translateJsonIntoString(mrpBOMToERPArrayForSDM));
+				System.out.println('\n' + ERP_YPP16_310 + " " + methodName + " Result :" + result + '\n');
+			} else {
+				System.out.println('\n' + ERP_YPP16_310 + " " + methodName + " Data : " + mrpBOMToERPArrayForSDM
+						+ " (\u4e0d\u62cb\u8f49\u8cc7\u6599)");
 			}
 		} catch (Exception e) {
-			System.err.println("Error detail in Error.txt.");
-			String error = "searchMRP_BOM error : " + e.getMessage();
+			String error = ERP_YPP16_310 + " " + methodName + " error : " + e.getMessage();
+			System.err.println(error);
 			outputDataFile("Error.txt", error);
 		}
 
