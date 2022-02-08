@@ -8,6 +8,7 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -37,22 +38,18 @@ import com.matrixone.apps.domain.util.i18nNow;
 
 import matrix.db.Context;
 import matrix.db.JPO;
+import matrix.util.Pattern;
 import matrix.util.StringList;
 
 public class SPLM_SOPB_Excel_JPO_mxJPO {
 
-//	private static final String EXPORT_EXCEL_LOCATION = "D:\\eclipse-workspaceCompany\\morgaJian\\src\\MMC_data\\temp\\";
-//	private static final String EXPORT_EXCEL_LOCATIONZIP = "D:\\eclipse-workspaceCompany\\morgaJian\\src\\MMC_data\\123.zip";
-//	private static final String INPORT_SO_EXCEL_LOCATION = "D:\\eclipse-workspaceCompany\\morgaJian\\src\\MMC_data\\SO格式 - 20211211.xlsx";
-//	private static final String INPORT_PB_EXCEL_LOCATION = "D:\\eclipse-workspaceCompany\\morgaJian\\src\\MMC_data\\PB格式 - 20211211.xlsx";
-//	private static final String EXPORT_EXCEL_LOCATION = "C:\\temp\\morga\\temp\\";
-//	private static final String EXPORT_EXCEL_LOCATIONZIP = "C:\\temp\\morga\\123.zip";
 	private static final String INPORT_SO_EXCEL_LOCATION = "C:\\DassaultSystemesBatchFile\\SOExcelTemplate\\SO - 20211230.xlsx";
 	private static final String INPORT_PB_EXCEL_LOCATION = "C:\\DassaultSystemesBatchFile\\SOExcelTemplate\\PB - 20211211.xlsx";
 
 	private static final String TEMP_FOLDER = "PLMTemp\\createSOPBExcel\\";
 	private static final String TEMP_FOLDER_DEVICE = "D:\\";
 	private static final String VAULT = "eService Production";
+	private static final String FORCE_BREAKLINE = "\r\n";
 
 	/* can using method - Testing OK */
 	private String getTempFolderPath() throws Exception {
@@ -220,12 +217,8 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 	}
 
 	/* ---Dassault API package simple using--- */
-	private MapList getIsServicePartAI(Context context, DomainObject soObj, StringList busSelect) throws Exception {
-		return getSOAI(context, soObj, busSelect, "attribute[SPLM_IsServicePart]=='True'");
-	}
-
-	private MapList getHaveSubPartAI(Context context, DomainObject soObj, StringList busSelect) throws Exception {
-		return getSOAI(context, soObj, busSelect, "attribute[SPLM_HaveSubPart]=='True'");
+	private MapList getSOAI(Context context, DomainObject soObj, StringList busSelect) throws Exception {
+		return getSOAI(context, soObj, busSelect, "");
 	}
 
 	private MapList getSOAI(Context context, DomainObject soObj, StringList busSelect, String objectWhere)
@@ -240,6 +233,381 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 				objectWhere, // String objectWhere,
 				"", // String relationshipWhere
 				0); // int limit)
+	}
+
+	private MapList getRelatedVendor(Context context, DomainObject partObj, StringList busSelects,
+			StringList relSelects) throws Exception {
+		return partObj.getRelatedObjects(context, "SPLM_RelatedVendor", // relationshipPattern,
+				"SPLM_Vendor", // typePattern,
+				busSelects, // StringList objectSelects,
+				relSelects, // StringList relationshipSelects,
+				false, // boolean getTo,
+				true, // boolean getFrom,
+				(short) 1, // short recurseToLevel,
+				"", // String objectWhere,
+				"", // String relationshipWhere
+				0); // int limit)
+	}
+
+	private MapList getSOReleaseDocumentForDealer(Context context, DomainObject partObj, DomainObject soObj,
+			StringList busSelects) throws Exception {
+		return getSORelease(context, partObj, busSelects, "SPLM_Document",
+				"attribute[SPLM_SO]=='" + soObj.getInfo(context, DomainConstants.SELECT_NAME)
+						+ "' && attribute[SPLM_SOReleaseItemType]=='Dealer'");
+	}
+
+	private MapList getSOReleaseDocumentForVendor(Context context, DomainObject partObj, DomainObject soObj,
+			StringList busSelects) throws Exception {
+		return getSORelease(context, partObj, busSelects, "SPLM_Document",
+				"attribute[SPLM_SO]=='" + soObj.getInfo(context, DomainConstants.SELECT_NAME)
+						+ "' && attribute[SPLM_SOReleaseItemType]=='Vendor'");
+	}
+
+	private MapList getSOReleaseDealer(Context context, DomainObject partObj, DomainObject soObj, StringList busSelects)
+			throws Exception {
+		return getSORelease(context, partObj, busSelects, "SPLM_Dealer",
+				"attribute[SPLM_SO]=='" + soObj.getInfo(context, DomainConstants.SELECT_NAME) + "'");
+	}
+
+	private MapList getSOReleaseVendor(Context context, DomainObject partObj, DomainObject soObj, StringList busSelects)
+			throws Exception {
+		return getSORelease(context, partObj, busSelects, "SPLM_Vendor",
+				"attribute[SPLM_SO]=='" + soObj.getInfo(context, DomainConstants.SELECT_NAME) + "'");
+	}
+
+	private MapList getSORelease(Context context, DomainObject partObj, StringList busSelects, String typePattern,
+			String relWhere) throws Exception {
+		return partObj.getRelatedObjects(context, "SPLM_RelatedSOReleaseItem", // relationshipPattern,
+				typePattern, // typePattern,
+				busSelects, // StringList objectSelects,
+				null, // StringList relationshipSelects,
+				false, // boolean getTo,
+				true, // boolean getFrom,
+				(short) 1, // short recurseToLevel,
+				"", // String objectWhere,
+				relWhere, // String relationshipWhere
+				0); // int limit)
+	}
+
+	/* --- package ArrayList Location --- */
+	private ArrayList<AffectedItem> getAffectedItemArrayList(Context context, MapList servicesPartMapList,
+			DomainObject soDomObj) throws Exception {
+		StringList altOptBusSelects = new StringList();
+		altOptBusSelects.add(DomainConstants.SELECT_NAME);
+		StringList altOptRelSelects = new StringList();
+		altOptRelSelects.add("attribute[SPLM_OptionalExchangeable]");
+		altOptRelSelects.add("attribute[SPLM_OptionalType]");
+
+		StringList parentBusSelects = new StringList();
+		parentBusSelects.add(DomainConstants.SELECT_NAME);
+		parentBusSelects.add(DomainConstants.SELECT_ID);
+		StringList parentRelSelects = new StringList();
+		parentRelSelects.add("attribute[SPLM_RelatedEO]");
+		parentRelSelects.add("attribute[SPLM_RelatedPO]");
+
+		StringList soSendVendorBusSelects = new StringList();
+		soSendVendorBusSelects.add(DomainConstants.SELECT_NAME);
+
+		StringList soSendDocumentForVendorBusSelects = new StringList();
+		soSendDocumentForVendorBusSelects.add(DomainConstants.SELECT_NAME);
+		soSendDocumentForVendorBusSelects.add("attribute[SPLM_DocType]");
+
+		StringList vendorBusSelects = new StringList();
+		vendorBusSelects.add(DomainConstants.SELECT_NAME);
+		StringList vendorRelSelects = new StringList();
+		vendorRelSelects.add("attribute[SPLM_VendorPartNo]");
+
+		ArrayList<AffectedItem> affectedItemArrayList = new ArrayList<AffectedItem>();
+		DomainObject partDomObj = new DomainObject();
+
+		String soName = soDomObj.getInfo(context, DomainConstants.SELECT_NAME);
+		StringList soAffectedParentPartIdList = soDomObj.getInfoList(context, "from[SPLM_ReferenceParentPart].to.id");
+
+		for (Object partInfo : servicesPartMapList) {
+			Map<String, String> partMap = (Map) partInfo;
+			String partId = partMap.get(DomainConstants.SELECT_ID);
+			String partName = partMap.get(DomainConstants.SELECT_NAME);
+			String partNameCh = partMap.get("attribute[SPLM_Name_TC]");
+			String partNameEn = partMap.get("attribute[SPLM_Name_EN]");
+			String partMediumPackingNums = "1";
+			String partUnit = partMap.get("attribute[SPLM_Unit]");
+			String partMaterialType = partMap.get("attribute[SPLM_MaterialType]");
+			String partMaterialGroup = partMap.get("attribute[SPLM_MaterialGroup]");
+			String partItemSubType = partMap.get("attribute[SPLM_ItemSubType]");
+			String partPuchasingGroup = partMap.get("attribute[SPLM_PurchasingGroup]");
+			String colorPartACNO = partMap.get("attribute[SPLM_AC_NO]");
+			String colorPartCPNO = partMap.get("attribute[SPLM_CP_NO]");
+			String partRemark = partMap.get("attribute[SPLM_SO_Note]");
+			partDomObj.setId(partId);
+			String relatedEO = "";
+			String relatedPO = "";
+			String parentPart = "";
+			String altOptPart = "";
+
+			// partParent data processing
+			MapList parentPartMapList = partDomObj.getRelatedObjects(context, "SPLM_SBOM", // relationshipPattern,
+					"*", // typePattern,
+					parentBusSelects, // StringList objectSelects,
+					parentRelSelects, // StringList relationshipSelects,
+					true, // boolean getTo,
+					false, // boolean getFrom,
+					(short) 1, // short recurseToLevel,
+					"", // String objectWhere,
+					"", // String relationshipWhere
+					0); // int limit)
+
+			if (!parentPartMapList.isEmpty()) {
+				parentPart = (String) parentPartMapList.stream().filter(
+						obj -> soAffectedParentPartIdList.contains((String) ((Map) obj).get(DomainConstants.SELECT_ID)))
+						.map(obj -> (String) ((Map) obj).get(DomainConstants.SELECT_NAME))
+						.collect(Collectors.joining(FORCE_BREAKLINE));
+
+				relatedEO = (String) parentPartMapList.stream().filter(
+						obj -> soAffectedParentPartIdList.contains((String) ((Map) obj).get(DomainConstants.SELECT_ID)))
+						.map(obj -> (String) ((Map) obj).get("attribute[SPLM_RelatedEO]"))
+						.collect(Collectors.joining(FORCE_BREAKLINE));
+
+				relatedPO = (String) parentPartMapList.stream().filter(
+						obj -> soAffectedParentPartIdList.contains((String) ((Map) obj).get(DomainConstants.SELECT_ID)))
+						.map(obj -> (String) ((Map) obj).get("attribute[SPLM_RelatedPO]"))
+						.collect(Collectors.joining(FORCE_BREAKLINE));
+			}
+
+			// vendor/document data processing
+			MapList sendVendorMapList = getSOReleaseVendor(context, partDomObj, soDomObj, soSendVendorBusSelects);
+
+			if (sendVendorMapList.isEmpty()) {
+				throw new Exception("\u552e\u670d\u96f6\u4ef6 " + partName + " \u586b\u9078 \u767c\u9001\u5ee0\u5546");
+			}
+
+			List<String> sendVendorList = (List<String>) sendVendorMapList.stream()
+					.map(obj -> (String) ((Map) obj).get(DomainConstants.SELECT_NAME)).collect(Collectors.toList());
+
+			// groupName data processing
+			MapList sendDocumentForVendorMapList = getSOReleaseDocumentForVendor(context, partDomObj, soDomObj,
+					soSendDocumentForVendorBusSelects);
+
+			String groupName = (String) sendDocumentForVendorMapList.stream().filter(
+					obj -> ((String) ((Map) obj).get("attribute[SPLM_DocType]")).equalsIgnoreCase("Part Drawing"))
+					.map(obj -> (String) ((Map) obj).get(DomainConstants.SELECT_NAME))
+					.collect(Collectors.joining(FORCE_BREAKLINE));
+
+			// altPart/optPart data processing
+			MapList optAltMapList = partDomObj.getRelatedObjects(context, "SPLM_RelatedOptionalPart", // relationshipPattern,
+					"SPLM_Part,SPLM_ColorPart", // typePattern,
+					altOptBusSelects, // StringList objectSelects,
+					altOptRelSelects, // StringList relationshipSelects,
+					true, // boolean getTo,
+					false, // boolean getFrom,
+					(short) 1, // short recurseToLevel,
+					"", // String objectWhere,
+					"", // String relationshipWhere
+					0); // int limit)
+
+			ArrayList<String> optAltArrayList = new ArrayList<String>();
+			for (Object optAltObj : optAltMapList) {
+				Map<String, String> optAltMap = (Map) optAltObj;
+				String optAltName = optAltMap.get(DomainConstants.SELECT_NAME);
+				String optAltOptionType = optAltMap.get("attribute[SPLM_OptionalType]");
+				String optAltExchageable = optAltMap.get("attribute[SPLM_OptionalExchangeable]");
+				String optAltRel = optAltExchageable.isEmpty() ? optAltName + "(" + optAltOptionType + ")"
+						: optAltName + "(" + optAltExchageable + ")";
+				optAltArrayList.add(optAltRel);
+			}
+			altOptPart = String.join(FORCE_BREAKLINE, optAltArrayList);
+
+			// colorPart ACNO/CPNO
+			String partACNO = colorPartACNO.isEmpty() ? "" : (colorPartACNO + "_" + FORCE_BREAKLINE + colorPartCPNO);
+
+			// vendor all through rel[SPLM_RelatedVendor].vendor.attribute[]==TRUE
+			MapList vendorPartNoMapList = getRelatedVendor(context, partDomObj, vendorBusSelects, vendorRelSelects);
+
+			Map<String, String> vendorPartNoMap = (Map<String, String>) vendorPartNoMapList.stream()
+					.collect(Collectors.toMap(obj -> (String) ((Map) obj).get(DomainConstants.SELECT_NAME),
+							obj -> (String) ((Map) obj).get("attribute[SPLM_VendorPartNo]")));
+
+			/* --- AffectedItem Part --- */
+			for (String sendVendor : sendVendorList) {
+				AffectedItem affectedItem = new AffectedItem();
+				affectedItem.setSendVendorName(sendVendor);
+				affectedItem.setPart(parentPart);
+				affectedItem.setAffectedItemPart(partName);
+				affectedItem.setPartName(partNameCh + FORCE_BREAKLINE + partNameEn);
+				affectedItem.setDocumentFile(groupName);
+				affectedItem.setMediumPackingNums(partMediumPackingNums);
+				affectedItem.setUnit(partUnit);
+				affectedItem.setMaterialType(partMaterialType);
+				affectedItem.setMaterialGroup(partMaterialGroup);
+				affectedItem.setPartType(partItemSubType);
+				affectedItem.setPurchasingGroup(partPuchasingGroup);
+				affectedItem.setVendorPartNo(vendorPartNoMap.get(sendVendor));
+				affectedItem.setRelatedEO(relatedEO);
+				affectedItem.setRelatedPO(relatedPO);
+				affectedItem.setAltOptPart(altOptPart);
+				affectedItem.setAcNo(partACNO);
+				affectedItem.setRemark(partRemark);
+				affectedItemArrayList.add(affectedItem);
+			}
+		}
+		return affectedItemArrayList;
+	}
+
+	private ArrayList<PartBom> getAIPartBomArrayList(Context context, MapList servicesPartMapList,
+			DomainObject soDomObj) throws Exception {
+		DomainObject partDomObj = new DomainObject();
+
+		StringList sBomBusSelects = new StringList();
+		sBomBusSelects.add(DomainConstants.SELECT_NAME);
+		sBomBusSelects.add(DomainConstants.SELECT_ID);
+		StringList sBomRelSelects = new StringList();
+		sBomRelSelects.add("attribute[Quantity]");
+		sBomRelSelects.add("attribute[SPLM_GroupCode]");
+		sBomRelSelects.add("attribute[SPLM_PNC]"); // pnc
+		sBomRelSelects.add("attribute[SPLM_Materiel_KD_Type]"); // K-/D-
+		sBomRelSelects.add("attribute[SPLM_EnableDate]"); // Start Date
+		sBomRelSelects.add("attribute[SPLM_DisableDate]"); // End Date
+		sBomRelSelects.add("attribute[SPLM_BOM_Note]"); // Bom remark
+
+		StringList subPartVendorBusSelects = new StringList();
+		subPartVendorBusSelects.add(DomainConstants.SELECT_NAME);
+		StringList subPartVendorRelSelects = new StringList();
+		subPartVendorRelSelects.add("attribute[SPLM_Valid]");
+
+		StringList partVendorBusSelects = new StringList();
+		partVendorBusSelects.add(DomainConstants.SELECT_NAME);
+
+		String soName = soDomObj.getInfo(context, DomainConstants.SELECT_NAME);
+
+		for (Object partInfo : servicesPartMapList) {
+			Map<String, String> partMap = (Map) partInfo;
+			String partId = partMap.get(DomainConstants.SELECT_ID);
+			String partName = partMap.get(DomainConstants.SELECT_NAME);
+
+			partDomObj.setId(partId);
+			MapList subPartMapList = partDomObj.getRelatedObjects(context, "SPLM_SBOM,SPLM_MBOM", // relationshipPattern,
+					"*", // typePattern,
+					sBomBusSelects, // StringList objectSelects,
+					sBomRelSelects, // StringList relationshipSelects,
+					false, // boolean getTo,
+					true, // boolean getFrom,
+					(short) 1, // short recurseToLevel,
+					"", // String objectWhere,
+					"", // String relationshipWhere
+					0); // int limit)
+
+			MapList sendVendorMapList = getSOReleaseVendor(context, partDomObj, soDomObj, partVendorBusSelects);
+			List<String> sendVendorList = (List<String>) sendVendorMapList.stream()
+					.map(obj -> (String) ((Map) obj).get(DomainConstants.SELECT_NAME)).collect(Collectors.toList());
+
+			DomainObject subPartDomObj = new DomainObject();
+
+			ArrayList<PartBom> partBomArrayList = new ArrayList<PartBom>();
+			for (Object subPartObj : subPartMapList) {
+				Map<String, String> subPartMap = (Map) subPartObj;
+
+				String subPartId = subPartMap.get(DomainConstants.SELECT_ID);
+				String subPartName = subPartMap.get(DomainConstants.SELECT_NAME);
+				String subPartQuantity = subPartMap.get("attribute[Quantity]");
+				String subPartGroupCode = subPartMap.get("attribute[SPLM_GroupCode]");
+				String subPartPNC = subPartMap.get("attribute[SPLM_PNC]");
+				String subPartKDType = subPartMap.get("attribute[SPLM_Materiel_KD_Type]");
+				String subPartStartDate = subPartMap.get("attribute[SPLM_EnableDate]");
+				String subPartEndDate = subPartMap.get("attribute[SPLM_DisableDate]");
+				String subPartBomRemark = subPartMap.get("attribute[SPLM_BOM_Note]");
+				String subPartStartVendor = "";
+
+				subPartDomObj.setId(subPartId);
+
+				MapList subPartVendorMapList = getRelatedVendor(context, subPartDomObj, subPartVendorBusSelects,
+						subPartVendorRelSelects);
+
+				if (!subPartVendorMapList.isEmpty()) {
+					subPartStartVendor = (String) subPartVendorMapList.stream()
+							.filter(obj -> ((String) ((Map) obj).get("attribute[SPLM_Valid]")).equalsIgnoreCase("*-"))
+							.map(obj -> (String) ((Map) obj).get(DomainConstants.SELECT_NAME))
+							.collect(Collectors.joining(FORCE_BREAKLINE));
+				}
+
+				for (String Vendor : sendVendorList) {
+					PartBom partBom = new PartBom();
+					partBom.setSendVendorName(Vendor);
+					partBom.setPart(partName);
+					partBom.setSubPart(subPartName);
+					partBom.setQuantity(subPartQuantity);
+					partBom.setGroupCode(subPartGroupCode);
+					partBom.setPnc(subPartPNC);
+					partBom.setTypeKD(subPartKDType);
+					partBom.setVendorStar(subPartKDType.equalsIgnoreCase("*-") ? subPartStartVendor : "");
+					partBom.setStartDate(subPartStartDate);
+					partBom.setEndDate(subPartEndDate);
+					partBom.setBomRemark(subPartBomRemark);
+					partBomArrayList.add(partBom);
+				}
+			}
+		}
+		return new ArrayList<PartBom>();
+	}
+
+	private ArrayList<Document> getDocumentArrayList(Context context, MapList servicesPartMapList,
+			DomainObject soDomObj, String fileTempFolder) throws Exception {
+
+		StringList documentBusSelects = new StringList();
+		documentBusSelects.add(DomainConstants.SELECT_NAME);
+		documentBusSelects.add(DomainConstants.SELECT_ID);
+
+		StringList partVendorBusSelects = new StringList();
+		partVendorBusSelects.add(DomainConstants.SELECT_NAME);
+
+		DomainObject partDomObj = new DomainObject();
+		DomainObject documentDomObj = new DomainObject();
+
+		ContextUtil.pushContext(context);
+		MqlUtil.mqlCommand(context, "trigger off");
+		ArrayList<Document> documentArrayList = new ArrayList<Document>();
+		try {
+			for (Object partObj : servicesPartMapList) {
+				Map<String, String> partMap = (Map) partObj;
+				partDomObj.setId(partMap.get(DomainConstants.SELECT_ID));
+
+				MapList documentMapList = getSOReleaseDocumentForVendor(context, partDomObj, soDomObj,
+						documentBusSelects);
+
+				MapList sendVendorMapList = getSOReleaseVendor(context, partDomObj, soDomObj, partVendorBusSelects);
+				List<String> sendVendorList = (List<String>) sendVendorMapList.stream()
+						.map(obj -> (String) ((Map) obj).get(DomainConstants.SELECT_NAME)).collect(Collectors.toList());
+
+				for (Object documentObj : documentMapList) {
+					Map<String, String> documentMap = (Map) documentObj;
+					String documentId = documentMap.get(DomainConstants.SELECT_ID);
+					String documentName = documentMap.get(DomainConstants.SELECT_NAME);
+					documentDomObj.setId(documentId);
+
+					ArrayList<String> picFileArrayList = new ArrayList<String>();
+					for (matrix.db.File documentFile : documentDomObj.getFiles(context)) {
+						String fileName = documentFile.getName();
+						String fileLocation = fileTempFolder + "\\" + fileName;
+						documentDomObj.checkoutFile(context, false, documentFile.getFormat(), fileName, fileTempFolder);
+						if (isPictureFile(fileLocation)) {
+							picFileArrayList.add(fileLocation);
+						}
+					}
+
+					for (String sendVendor : sendVendorList) {
+						Document document = new Document();
+						document.setSendVendorName(sendVendor);
+						document.setPicName(documentName);
+						document.setPicFileLocations(picFileArrayList);
+						documentArrayList.add(document);
+					}
+				}
+			}
+		} catch (Exception e) {
+			throw e;
+		} finally {
+			MqlUtil.mqlCommand(context, "trigger on");
+			ContextUtil.popContext(context);
+		}
+		return documentArrayList;
 	}
 
 	/////////////////////////////////////////////////////////////////////// task
@@ -366,7 +734,7 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 		return returnMap;
 	}
 
-	/* assemble Info and publish Excel*/
+	/* assemble Info and publish Excel */
 	private ArrayList<SOPublish> getAffectedItemInfo(Context context, DomainObject soObj, String fileTempFolder)
 			throws Exception {
 
@@ -385,315 +753,39 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 		busSelectsPart.add("attribute[SPLM_CP_NO]"); // ACNO
 		busSelectsPart.add("attribute[SPLM_SO_Note]"); // REMARK
 
-		StringList busSelectAltOpt = new StringList();
-		busSelectAltOpt.add(DomainConstants.SELECT_NAME);
-		StringList relSelectAltOpt = new StringList();
-		relSelectAltOpt.add("attribute[SPLM_OptionalExchangeable]");
-		relSelectAltOpt.add("attribute[SPLM_OptionalType]");
-
-		StringList parentBusSelects = new StringList();
-		parentBusSelects.add(DomainConstants.SELECT_ID);
-		parentBusSelects.add(DomainConstants.SELECT_NAME);
-		StringList parentRelSelects = new StringList();
-		parentRelSelects.add("attribute[SPLM_RelatedEO]");
-		parentRelSelects.add("attribute[SPLM_RelatedPO]");
-
-		StringList busSelectSBom = new StringList();
-		busSelectSBom.add(DomainConstants.SELECT_NAME);
-		busSelectSBom.add(DomainConstants.SELECT_ID);
-		StringList relSelectSBom = new StringList();
-		relSelectSBom.add("attribute[Quantity]");
-		relSelectSBom.add("attribute[SPLM_GroupCode]");
-		relSelectSBom.add("attribute[SPLM_PNC]"); // pnc
-		relSelectSBom.add("attribute[SPLM_Materiel_KD_Type]"); // K-/D-
-		relSelectSBom.add("attribute[SPLM_EnableDate]"); // Start Date
-		relSelectSBom.add("attribute[SPLM_DisableDate]"); // End Date
-		relSelectSBom.add("attribute[SPLM_BOM_Note]"); // Bom remark
-
-		StringList busSelectSoDocumentVendor = new StringList();
-		busSelectSoDocumentVendor.add(DomainConstants.SELECT_NAME);
-		busSelectSoDocumentVendor.add(DomainConstants.SELECT_ID);
-		busSelectSoDocumentVendor.add("attribute[SPLM_DocType]");
-		
-		StringList busSelectAllVendor = new StringList();
-		busSelectAllVendor.add(DomainConstants.SELECT_NAME);
-		StringList relSelectAllVendor = new StringList();
-		relSelectAllVendor.add("attribute[SPLM_VendorPartNo]");
-		relSelectAllVendor.add("attribute[SPLM_Valid]");
-
 		String soName = soObj.getInfo(context, DomainConstants.SELECT_NAME);
-		String forceBreakLine = "\r\n";
 
-		MapList servicesPartMapList = getIsServicePartAI(context, soObj, busSelectsPart);
+		MapList servicesPartMapList = getSOAI(context, soObj, busSelectsPart);
 		if (servicesPartMapList.isEmpty()) {
 			throw new Exception("\u7f3a\u5c11 \u5f71\u97ff\u4ef6\u865f");
 		}
 
-		StringList soAffectedParentPartIdList = soObj.getInfoList(context, "from[SPLM_ReferenceParentPart].to.id");
-
 		ArrayList<SOPublish> soPublishArrayList = new ArrayList<SOPublish>();
-		DomainObject partDomObj = new DomainObject();
-
-		for (Object partInfo : servicesPartMapList) {
-			// AI
-			Map partMap = (Map) partInfo;
-			String partId = (String) partMap.get(DomainConstants.SELECT_ID);
-			String partName = (String) partMap.get(DomainConstants.SELECT_NAME);
-			String partNameCh = (String) partMap.get("attribute[SPLM_Name_TC]");
-			String partNameEn = (String) partMap.get("attribute[SPLM_Name_EN]");
-			String partMediumPackingNums = "1";
-			String partUnit = (String) partMap.get("attribute[SPLM_Unit]");
-			String partMaterialType = (String) partMap.get("attribute[SPLM_MaterialType]");
-			String partMaterialGroup = (String) partMap.get("attribute[SPLM_MaterialGroup]");
-			String partItemSubType = ((String) partMap.get("attribute[SPLM_ItemSubType]"));
-			String partPuchasingGroup = ((String) partMap.get("attribute[SPLM_PurchasingGroup]"));
-			String colorPartACNO = (String) partMap.get("attribute[SPLM_AC_NO]");
-			String colorPartCPNO = (String) partMap.get("attribute[SPLM_CP_NO]");
-			String partRemark = (String) partMap.get("attribute[SPLM_SO_Note]");
-			partDomObj.setId(partId);
-			String relatedEO = "";
-			String relatedPO = "";
-			String parentPart = "";
-			String altOptPart = "";
-
-			// partParent data processing
-			MapList parentPartMapList = partDomObj.getRelatedObjects(context, "SPLM_SBOM", // relationshipPattern,
-					"*", // typePattern,
-					parentBusSelects, // StringList objectSelects,
-					parentRelSelects, // StringList relationshipSelects,
-					true, // boolean getTo,
-					false, // boolean getFrom,
-					(short) 1, // short recurseToLevel,
-					"", // String objectWhere,
-					"", // String relationshipWhere
-					0); // int limit)
-
-			parentPart = (String) parentPartMapList.stream().filter(
-					obj -> soAffectedParentPartIdList.contains((String) ((Map) obj).get(DomainConstants.SELECT_ID)))
-					.map(obj -> (String) ((Map) obj).get(DomainConstants.SELECT_NAME))
-					.collect(Collectors.joining(forceBreakLine));
+		
+		ArrayList<AffectedItem> affedAffectedItemArrayList = this.getAffectedItemArrayList(context, servicesPartMapList, soObj);
+		ArrayList<PartBom> partBomArrayList = this.getAIPartBomArrayList(context, servicesPartMapList, soObj);
+		ArrayList<Document> documentArrayList = this.getDocumentArrayList(context, servicesPartMapList, soObj, fileTempFolder);
+		HashSet<String> soSendVendorSet = this.getReleaseSoSend(context, soObj, "vendor");
+		
+		for (String soSendVendor : soSendVendorSet) {
+			ArrayList<AffectedItem> aiArrayList = affedAffectedItemArrayList.stream()
+					.filter(obj -> soSendVendor.equals(obj.getSendVendorName()))
+					.collect(Collectors.toCollection(ArrayList::new));
 			
-			if(!parentPart.isEmpty()) {
-				relatedEO = (String) parentPartMapList.stream().filter(
-						obj -> soAffectedParentPartIdList.contains((String) ((Map) obj).get(DomainConstants.SELECT_ID)))
-						.map(obj -> (String) ((Map) obj).get("attribute[SPLM_RelatedEO]"))
-						.collect(Collectors.joining(forceBreakLine));
-				
-				relatedPO = (String) parentPartMapList.stream().filter(
-						obj -> soAffectedParentPartIdList.contains((String) ((Map) obj).get(DomainConstants.SELECT_ID)))
-						.map(obj -> (String) ((Map) obj).get("attribute[SPLM_RelatedPO]"))
-						.collect(Collectors.joining(forceBreakLine));
-			}
-
-			// vendor/document data processing
-			MapList vendorMapList = partDomObj.getRelatedObjects(context, "SPLM_RelatedSOReleaseItem", // relationshipPattern,
-					"*", // typePattern,
-					busSelectSoDocumentVendor, // StringList objectSelects,
-					null, // StringList relationshipSelects,
-					false, // boolean getTo,
-					true, // boolean getFrom,
-					(short) 1, // short recurseToLevel,
-					"", // String objectWhere,
-					"attribute[SPLM_SO]=='" + soName + "' &&  attribute[SPLM_SOReleaseItemType]=='Vendor'", // String
-																											// relationshipWhere
-					0); // int limit)
-
-			List<String> vendorList = (List<String>) vendorMapList.stream().filter(
-					obj -> ((String) ((Map) obj).get(DomainConstants.SELECT_TYPE)).equalsIgnoreCase("SPLM_Vendor"))
-					.map(obj -> (String) ((Map) obj).get(DomainConstants.SELECT_NAME)).collect(Collectors.toList());
-
-			if (vendorList.isEmpty()) {
-				throw new Exception("\u552e\u670d\u96f6\u4ef6 " + partName + " \u586b\u9078 \u767c\u9001\u5ee0\u5546");
-			}
-
-			// documnetId Map collection -> structure <documentName , documentId> , filter by attribute[SPLM_DocType]=='Part Drawing'
-			Map<String, String> soDocumentIdList = (Map<String, String>) vendorMapList.stream()
-					.filter(obj -> ((String) ((Map) obj).get("attribute[SPLM_DocType]")).equalsIgnoreCase("Part Drawing"))
-					.collect(Collectors.toMap(obj -> (String) ((Map) obj).get(DomainConstants.SELECT_NAME),
-							obj -> (String) ((Map) obj).get(DomainConstants.SELECT_ID)));
-
-			// groupName data processing
-			String groupName = (String) vendorMapList.stream()
-					.filter(obj -> ((String) ((Map) obj).get("attribute[SPLM_DocType]")).equalsIgnoreCase("Part Drawing"))
-					.map(obj -> (String) ((Map) obj).get(DomainConstants.SELECT_NAME))
-					.collect(Collectors.joining(forceBreakLine));
-
-			// partType data processing
-			if (!partItemSubType.isEmpty()) {
-				partItemSubType = i18nNow.getRangeI18NString("SPLM_ItemSubType", partItemSubType, "zh");
-			}
-
-			// altPart/optPart data processing
-			MapList optAltMapList = partDomObj.getRelatedObjects(context, "SPLM_RelatedOptionalPart", // relationshipPattern,
-					"SPLM_Part,SPLM_ColorPart", // typePattern,
-					busSelectAltOpt, // StringList objectSelects,
-					relSelectAltOpt, // StringList relationshipSelects,
-					true, // boolean getTo,
-					false, // boolean getFrom,
-					(short) 1, // short recurseToLevel,
-					"", // String objectWhere,
-					"", // String relationshipWhere
-					0); // int limit)
-
-			ArrayList<String> optAltArrayList = new ArrayList<String>();
-			for (Object optAltObj : optAltMapList) {
-				Map optAltMap = (Map) optAltObj;
-				String optAltName = (String) optAltMap.get(DomainConstants.SELECT_NAME);
-				String optAltOptionType = (String) optAltMap.get("attribute[SPLM_OptionalType]");
-				String optAltExchageable = (String) optAltMap.get("attribute[SPLM_OptionalExchangeable]");
-				String optAltRel = optAltExchageable.isEmpty() ? optAltName + "(" + optAltOptionType + ")"
-						: optAltName + "(" + optAltExchageable + ")";
-				optAltArrayList.add(optAltRel);
-			}
-			altOptPart = String.join(forceBreakLine, optAltArrayList);
-
-			// colorPart ACNO/CPNO
-			String partACNO = colorPartACNO.isEmpty() ? "" : (colorPartACNO + "_" + forceBreakLine + colorPartCPNO);
-
-			/* --- BOM Part --- */
-			MapList subPartMapList = partDomObj.getRelatedObjects(context, "SPLM_SBOM,SPLM_MBOM", // relationshipPattern,
-					"*", // typePattern,
-					busSelectSBom, // StringList objectSelects,
-					relSelectSBom, // StringList relationshipSelects,
-					false, // boolean getTo,
-					true, // boolean getFrom,
-					(short) 1, // short recurseToLevel,
-					"", // String objectWhere,
-					"", // String relationshipWhere
-					0); // int limit)
-
-			// vendor all through rel[SPLM_RelatedVendor].vendor.attribute[]==TRUE
-			MapList allVenderMapList = partDomObj.getRelatedObjects(context, "SPLM_RelatedVendor", // relationshipPattern,
-					"SPLM_Vendor", // typePattern,
-					busSelectAllVendor, // StringList objectSelects,
-					relSelectAllVendor, // StringList relationshipSelects,
-					false, // boolean getTo,
-					true, // boolean getFrom,
-					(short) 1, // short recurseToLevel,
-					"", // String objectWhere,
-					"", // String relationshipWhere
-					0); // int limit)
+			ArrayList<PartBom> pbArrayList = partBomArrayList.stream()
+					.filter(obj -> soSendVendor.equals(obj.getSendVendorName()))
+					.collect(Collectors.toCollection(ArrayList::new));
 			
-			Map<String, String> vendorPartNoMap = (Map<String, String>) allVenderMapList.stream()
-//					.map(obj -> (String) ((Map) obj).get("attribute[SPLM_VendorPartNo]"))
-//					.collect(Collectors.joining(forceBreakLine));
-					.collect(Collectors.toMap(obj-> (String) ((Map) obj).get(DomainConstants.SELECT_NAME), obj-> (String) ((Map) obj).get("attribute[SPLM_VendorPartNo]")));
+			ArrayList<Document> docArrayList = documentArrayList.stream()
+					.filter(obj -> soSendVendor.equals(obj.getSendVendorName()))
+					.collect(Collectors.toCollection(ArrayList::new));
 			
-			ArrayList<PartBom> partBomArrayList = new ArrayList<PartBom>();
-			for (Object subPartObj : subPartMapList) {
-				Map subPartMap = (Map) subPartObj;
-
-				String subPartId = (String) subPartMap.get(DomainConstants.SELECT_ID);
-				String subPartStartDate = (String) subPartMap.get("attribute[SPLM_EnableDate]");
-				String subPartEndDate = (String) subPartMap.get("attribute[SPLM_DisableDate]");
-				String subPartKDType = (String) subPartMap.get("attribute[SPLM_Materiel_KD_Type]");
-				String subPartVendor = "";
-
-				// Date format change
-				subPartStartDate = subPartStartDate.isEmpty() ? "" : convertDateFormat(subPartStartDate, "yyyyMMdd");
-				subPartEndDate = subPartEndDate.isEmpty() ? "" : convertDateFormat(subPartEndDate, "yyyyMMdd");
-
-				if(subPartKDType.equalsIgnoreCase("*-")) {
-					DomainObject subPartDomObj = new DomainObject(subPartId);
-					MapList validMapList = subPartDomObj.getRelatedObjects(context, "SPLM_RelatedVendor", // relationshipPattern,
-							"SPLM_Vendor", // typePattern,
-							busSelectAllVendor, // StringList objectSelects,
-							relSelectAllVendor, // StringList relationshipSelects,
-							false, // boolean getTo,
-							true, // boolean getFrom,
-							(short) 1, // short recurseToLevel,
-							"", // String objectWhere,
-							"", // String relationshipWhere
-							0); // int limit)
-	
-					subPartVendor = (String) validMapList.stream()
-							.filter(obj -> ((String) ((Map) obj).get("attribute[SPLM_Valid]")).equalsIgnoreCase("*-"))
-							.map(obj -> (String) ((Map) obj).get(DomainConstants.SELECT_NAME))
-							.collect(Collectors.joining(forceBreakLine));
-				}
-				
-				PartBom partBom = new PartBom();
-				partBom.part = partName;
-				partBom.subPart = (String) subPartMap.get(DomainConstants.SELECT_NAME);
-				partBom.quantity = (String) subPartMap.get("attribute[Quantity]");
-				partBom.groupCode = (String) subPartMap.get("attribute[SPLM_GroupCode]");
-				partBom.pnc = (String) subPartMap.get("attribute[SPLM_PNC]");
-				partBom.typeKD = subPartKDType.equalsIgnoreCase("*-") ? "" : subPartKDType;
-				partBom.vendor = subPartKDType.equalsIgnoreCase("*-") ? subPartVendor : "";
-				partBom.startDate = subPartStartDate;
-				partBom.endDate = subPartEndDate;
-				partBom.bomRemark = (String) subPartMap.get("attribute[SPLM_BOM_Note]");
-				partBomArrayList.add(partBom);
-			}
-
-			/* --- Pic download --- */
-			ContextUtil.pushContext(context);
-			MqlUtil.mqlCommand(context, "trigger off");
-			DomainObject documentDomObj = new DomainObject();
-			ArrayList<Document> documentArrayList = new ArrayList<Document>();
-			try {
-				for (String documentName : soDocumentIdList.keySet()) {
-					String documentId = soDocumentIdList.get(documentName);
-					documentDomObj.setId(documentId);
-					ArrayList<String> picFileArrayList = new ArrayList<String>();
-					for (matrix.db.File documentFile : documentDomObj.getFiles(context)) {
-						String fileName = documentFile.getName();
-						String fileLocation = fileTempFolder + "\\" + fileName;
-						documentDomObj.checkoutFile(context, false, documentFile.getFormat(), fileName, fileTempFolder);
-						if (isPictureFile(fileLocation)) {
-							picFileArrayList.add(fileLocation);
-						}
-					}
-					Document document = new Document();
-					document.picName = documentName;
-					document.picFileLocations = picFileArrayList;
-					documentArrayList.add(document);
-				}
-			} catch (Exception e) {
-				throw e;
-			} finally {
-				MqlUtil.mqlCommand(context, "trigger on");
-				ContextUtil.popContext(context);
-			}
-			
-			/* --- AffectedItem Part ---*/
-			AffectedItem affectedItem = new AffectedItem();
-			affectedItem.part = parentPart;
-			affectedItem.affectedItemPart = partName;
-			affectedItem.partName = partNameCh + forceBreakLine + partNameEn;
-			affectedItem.documentFile = groupName;
-			affectedItem.mediumPackingNums = partMediumPackingNums;
-			affectedItem.unit = partUnit;
-			affectedItem.materialType = partMaterialType;
-			affectedItem.materialGroup = partMaterialGroup;
-			affectedItem.partType = partItemSubType;
-			affectedItem.purchasingGroup = partPuchasingGroup;
-			affectedItem.referenceEO = relatedEO;
-			affectedItem.referencePO = relatedPO;
-			affectedItem.altOptPart = altOptPart;
-			affectedItem.acNo = partACNO;
-			affectedItem.remark = partRemark;
-
-			/* --- assemble All data --- */
-			for (String vendorName : vendorList) {
-				Optional soOptional = soPublishArrayList.stream()
-						.filter(obj -> obj.fileName.equalsIgnoreCase(vendorName)).findFirst();
-
-				SOPublish so = (SOPublish) soOptional.orElse(new SOPublish());
-				if (so.isVendorNameEmpty()) {
-					so.fileName = vendorName;
-					so.vendorAI = new ArrayList<AffectedItem>();
-					so.vendorBom = new ArrayList<PartBom>();
-					so.vendorDocument = new ArrayList<Document>();
-					soPublishArrayList.add(so);
-				}
-				
-				AffectedItem affectedItemClone = (AffectedItem) affectedItem.clone();
-				affectedItemClone.vendor = vendorPartNoMap.get(vendorName);
-				so.vendorAI.add(affectedItemClone);
-				so.vendorBom.addAll(partBomArrayList);
-				so.vendorDocument.addAll(documentArrayList);
-			}
+			SOPublish soPublish = new SOPublish();
+			soPublish.setSendVendorName(soSendVendor);
+			soPublish.setVendorAI(aiArrayList);
+			soPublish.setVendorBom(pbArrayList);
+			soPublish.setVendorDocument(docArrayList);
+			soPublishArrayList.add(soPublish);
 		}
 		return soPublishArrayList;
 	}
@@ -794,15 +886,15 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 
 						Cell vendorCell = row.createCell(10);
 						vendorCell.setCellStyle(homePageCellStyleForAIDetail);
-						vendorCell.setCellValue(affectedItem.vendor);
+						vendorCell.setCellValue(affectedItem.vendorPartNo);
 
 						Cell referenceEOCell = row.createCell(11);
 						referenceEOCell.setCellStyle(homePageCellStyleForAIDetail);
-						referenceEOCell.setCellValue(affectedItem.referenceEO);
+						referenceEOCell.setCellValue(affectedItem.relatedEO);
 
 						Cell referencePOCell = row.createCell(12);
 						referencePOCell.setCellStyle(homePageCellStyleForAIDetail);
-						referencePOCell.setCellValue(affectedItem.referencePO);
+						referencePOCell.setCellValue(affectedItem.relatedPO);
 
 						Cell altOptPartCell = row.createCell(13);
 						altOptPartCell.setCellStyle(homePageCellStyleForAIDetail);
@@ -855,7 +947,7 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 
 						Cell vendorCell = row.createCell(6);
 						vendorCell.setCellStyle(BOMCellStyleForSBOM);
-						vendorCell.setCellValue(partBom.vendor);
+						vendorCell.setCellValue(partBom.vendorStar);
 
 						Cell startDateCell = row.createCell(7);
 						startDateCell.setCellStyle(BOMCellStyleForSBOM);
@@ -883,9 +975,9 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 						}
 					}
 				}
-				
+
 				protectSheets(soWorkBook);
-				String soFile = outputSoFileName + "\\" + soName + "_" + soPublish.fileName + ".xlsx";
+				String soFile = outputSoFileName + "\\" + soName + "_" + soPublish.sendVendorName + ".xlsx";
 				this.output(soWorkBook, soFile);
 				soFileArrayList.add(soFile);
 			}
@@ -910,8 +1002,6 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 		busSelectsPart.add("attribute[SPLM_PB_Note]");
 		busSelectsPart.add("attribute[SPLM_MaterialGroup]");
 
-
-
 //		StringList busSelectSBom = new StringList();
 //		busSelectSBom.add(DomainConstants.SELECT_NAME);
 //		busSelectSBom.add("attribute[SPLM_Name_TC]");
@@ -930,30 +1020,27 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 		busSelectSoDocumentVendor.add(DomainConstants.SELECT_ID);
 		busSelectSoDocumentVendor.add("attribute[SPLM_DocType]");
 
-		
 		String soName = soObj.getInfo(context, DomainConstants.SELECT_NAME);
 		String soPartCatalogue = soObj.getAttributeValue(context, "SPLM_PartsCatalogue");
-		String forceBreakLine = "\r\n";
 
-		MapList servicesPartMapList = getIsServicePartAI(context, soObj, busSelectsPart);
+		MapList servicesPartMapList = getSOAI(context, soObj, busSelectsPart);
 		if (servicesPartMapList.isEmpty()) {
 			throw new Exception("\u7f3a\u5c11 \u5f71\u97ff\u4ef6\u865f");
 		}
-		
+
 		String adaptMC = "";
-		MapList partCatalogueIdMapList = DomainObject.findObjects(context, "SPLM_PartsCatalogue",
-				soPartCatalogue, // name
+		MapList partCatalogueIdMapList = DomainObject.findObjects(context, "SPLM_PartsCatalogue", soPartCatalogue, // name
 				"*", // revision
 				"*", // owner
 				VAULT, // vault
 				"", // where
 				null, false, new StringList(DomainConstants.SELECT_ID), (short) 0);
-		
-		for(Object partCatalogueObj : partCatalogueIdMapList){
+
+		for (Object partCatalogueObj : partCatalogueIdMapList) {
 			Map partCatalogueMap = (Map) partCatalogueObj;
 			String partCatalogueId = (String) ((Map) partCatalogueMap).get(DomainConstants.SELECT_ID);
 			DomainObject partCatalogueDomObj = new DomainObject(partCatalogueId);
-		
+
 			MapList adaptMCMapList = partCatalogueDomObj.getRelatedObjects(context, "SPLM_RelatedSOReleaseItem", // relationshipPattern,
 					"SPLM_GroupDrawing", // typePattern,
 					new StringList("attribute[SPLM_ModelCode]"), // StringList objectSelects,
@@ -964,11 +1051,11 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 					"", // String objectWhere,
 					"attribute[SPLM_ModelCode]!=''", // String
 					0);
-		
-		    adaptMC = (String) adaptMCMapList.stream()
-		    		.filter(obj -> ((String) ((Map) obj).get("attribute[SPLM_ModelCode]")).isEmpty())
-		    		.map(obj -> (String) ((Map) obj).get("attribute[SPLM_ModelCode]"))
-		    		.collect(Collectors.joining(forceBreakLine));
+
+			adaptMC = (String) adaptMCMapList.stream()
+					.filter(obj -> ((String) ((Map) obj).get("attribute[SPLM_ModelCode]")).isEmpty())
+					.map(obj -> (String) ((Map) obj).get("attribute[SPLM_ModelCode]"))
+					.collect(Collectors.joining(FORCE_BREAKLINE));
 		}
 
 		ArrayList<PBPublish> pbPublishArrayList = new ArrayList<PBPublish>();
@@ -984,11 +1071,10 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 			String partAttPBNote = (String) partMap.get("attribute[SPLM_PB_Note]");
 			String partAttMaterialGroup = (String) partMap.get("attribute[SPLM_MaterialGroup]");
 			partDomObj.setId(partId);
-			
+
 			// materialGroup data processing
-			partAttMaterialGroup = (partAttMaterialGroup.equalsIgnoreCase("KD") || partAttMaterialGroup.equalsIgnoreCase("KDY"))
-					? "K"
-					: "D";
+			partAttMaterialGroup = (partAttMaterialGroup.equalsIgnoreCase("KD")
+					|| partAttMaterialGroup.equalsIgnoreCase("KDY")) ? "K" : "D";
 
 			// dealer/document data processing
 			MapList dealerMapList = partDomObj.getRelatedObjects(context, "SPLM_RelatedSOReleaseItem", // relationshipPattern,
@@ -1012,17 +1098,18 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 						"\u552e\u670d\u96f6\u4ef6 " + partName + " \u586b\u9078 \u767c\u9001\u7d93\u92b7\u5546");
 			}
 
-			// documnetId Map collection -> structure <documentName , documentId> , filter by attribute[SPLM_DocType]=='Part Drawing'
-			Map<String, String> soDocumentIdList = (Map<String, String>) dealerMapList.stream()
-					.filter(obj -> ((String) ((Map) obj).get("attribute[SPLM_DocType]")).equalsIgnoreCase("Part Drawing"))
+			// documnetId Map collection -> structure <documentName , documentId> , filter
+			// by attribute[SPLM_DocType]=='Part Drawing'
+			Map<String, String> soDocumentIdList = (Map<String, String>) dealerMapList.stream().filter(
+					obj -> ((String) ((Map) obj).get("attribute[SPLM_DocType]")).equalsIgnoreCase("Part Drawing"))
 					.collect(Collectors.toMap(obj -> (String) ((Map) obj).get(DomainConstants.SELECT_NAME),
 							obj -> (String) ((Map) obj).get(DomainConstants.SELECT_ID)));
 
 			// groupName data processing
-			String groupName = (String) dealerMapList.stream()
-					.filter(obj -> ((String) ((Map) obj).get("attribute[SPLM_DocType]")).equalsIgnoreCase("Part Drawing"))
+			String groupName = (String) dealerMapList.stream().filter(
+					obj -> ((String) ((Map) obj).get("attribute[SPLM_DocType]")).equalsIgnoreCase("Part Drawing"))
 					.map(obj -> (String) ((Map) obj).get(DomainConstants.SELECT_NAME))
-					.collect(Collectors.joining(forceBreakLine));
+					.collect(Collectors.joining(FORCE_BREAKLINE));
 
 			/* --- BOM Part --- */
 			MapList subPartMapList = partDomObj.getRelatedObjects(context, "SPLM_SBOM,SPLM_MBOM", // relationshipPattern,
@@ -1051,7 +1138,7 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 
 				PartBulletin partBulletin = new PartBulletin();
 				partBulletin.part = (String) subPartMap.get(DomainConstants.SELECT_NAME);
-				partBulletin.partName = subPartNameCh + forceBreakLine + subPartNameEn;
+				partBulletin.partName = subPartNameCh + FORCE_BREAKLINE + subPartNameEn;
 				partBulletin.documentFile = groupName;
 				partBulletin.groupCode = (String) subPartMap.get("attribute[SPLM_GroupCode]");
 				partBulletin.pnc = (String) subPartMap.get("attribute[SPLM_PNC]");
@@ -1061,7 +1148,7 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 				partBulletin.endDate = subPartEndDate;
 				partBulletin.pbRemark = (String) subPartMap.get("attribute[SPLM_PB_Note]");
 //				partBulletin.adaptableMS = ((String) subPartMap.get("attribute[SPLM_ModelSeries]")).replaceAll(",",
-//						forceBreakLine);
+//						FORCE_BREAKLINE);
 				partBulletin.adaptableMS = adaptMC;
 				partBulletinArrayList.add(partBulletin);
 			}
@@ -1190,7 +1277,7 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 
 						Cell nullCell = row.createCell(2);
 						nullCell.setCellStyle(homePageCellStyleForPBDetail);
-						
+
 						Cell groupDrawingCell = row.createCell(3);
 						groupDrawingCell.setCellStyle(homePageCellStyleForPBDetail);
 						groupDrawingCell.setCellValue(partBulletin.documentFile);
@@ -1226,7 +1313,7 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 						Cell adaptMSCell = row.createCell(11);
 						adaptMSCell.setCellStyle(homePageCellStyleForPBDetail);
 						adaptMSCell.setCellValue(partBulletin.adaptableMS);
-						
+
 						Cell nullCell1 = row.createCell(12);
 						nullCell1.setCellStyle(homePageCellStyleForPBDetail);
 						Cell nullCell2 = row.createCell(13);
@@ -1274,14 +1361,14 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 			soSendDeptArrayList.add(soSendDeptInfo.get(sendDeptStr));
 		}
 		SOPBTitle soPBTitle = new SOPBTitle();
-		soPBTitle.titleName = soObj.getInfo(context, DomainConstants.SELECT_NAME);
-		soPBTitle.titleIssuer = "\u6559\u80b2\u8a13\u7df4\u8cc7\u6599\u7d44";
-		soPBTitle.titleVault = Person.getPerson(context, soOwner).getInfo(context, Person.SELECT_FIRST_NAME);
-		soPBTitle.titleOwner = Person.getPerson(context, soOwner).getInfo(context, Person.SELECT_FIRST_NAME);
-		soPBTitle.titleSendDept = String.join(",", soSendDeptArrayList);
-		soPBTitle.titleReleaseDate = soReleaseDate;
-		soPBTitle.releaseSO = Boolean.valueOf(soObj.getAttributeValue(context, "SPLM_ReleaseSO"));
-		soPBTitle.releasePB = Boolean.valueOf(soObj.getAttributeValue(context, "SPLM_ReleasePB"));
+		soPBTitle.setTitleName(soObj.getInfo(context, DomainConstants.SELECT_NAME));
+		soPBTitle.setTitleIssuer("\u6559\u80b2\u8a13\u7df4\u8cc7\u6599\u7d44");
+		soPBTitle.setTitleVault("\u6636\u5ef7");
+		soPBTitle.setTitleOwner(Person.getPerson(context, soOwner).getInfo(context, Person.SELECT_FIRST_NAME));
+		soPBTitle.setTitleSendDept(String.join(",", soSendDeptArrayList));
+		soPBTitle.setTitleReleaseDate(soReleaseDate);
+		soPBTitle.setReleaseSO(Boolean.valueOf(soObj.getAttributeValue(context, "SPLM_ReleaseSO")));
+		soPBTitle.setReleasePB(Boolean.valueOf(soObj.getAttributeValue(context, "SPLM_ReleasePB")));
 
 		return soPBTitle;
 	}
@@ -1303,26 +1390,82 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 						obj -> (String) ((Map) obj).get(DomainConstants.SELECT_DESCRIPTION)));
 	}
 
-	private void protectSheets(XSSFWorkbook xswb) {
-		int sheetTotal = xswb.getNumberOfSheets();
-	    for (int i = 0; i < sheetTotal; i++) {
-	        Sheet sh = xswb.getSheetAt(i);
-	        if ( !Optional.ofNullable(sh).isPresent() ) {
-	            continue;
-	        }
-	        sh.protectSheet(UUID.randomUUID().toString());
-	    }
+	private HashSet<String> getReleaseSoSend(Context context, DomainObject soObj, String trigger) throws Exception {
+		trigger = trigger.equalsIgnoreCase("vendor")? "SPLM_Vendor": trigger.equalsIgnoreCase("dealer")? "SPLM_Dealer": "";		
+		if(trigger.isEmpty()) {
+			throw new Exception("Please type vendor / dealer for trigger");
+		}
+		MapList adaptMCMapList = soObj.getRelatedObjects(context, "SPLM_AffectedItem,SPLM_RelatedSOReleaseItem", // relationshipPattern,
+				"*", // typePattern,
+				new StringList(DomainConstants.SELECT_NAME), // StringList objectSelects,
+				null, // StringList relationshipSelects,
+				false, // boolean getTo,
+				true, // boolean getFrom,
+				(short) 2, // short recurseToLevel,
+				"", // String objectWhere,
+				"", // String
+				0,
+				new Pattern(trigger),
+				new Pattern("SPLM_RelatedSOReleaseItem"),
+				null);
+				
+		return (HashSet<String>) adaptMCMapList.stream()
+				.map(obj -> (String)((Map) obj).get(DomainConstants.SELECT_NAME))
+				.collect(Collectors.toCollection(HashSet::new));	
 	}
 	
+	private void protectSheets(XSSFWorkbook xswb) {
+		int sheetTotal = xswb.getNumberOfSheets();
+		for (int i = 0; i < sheetTotal; i++) {
+			Sheet sh = xswb.getSheetAt(i);
+			if (!Optional.ofNullable(sh).isPresent()) {
+				continue;
+			}
+			sh.protectSheet(UUID.randomUUID().toString());
+		}
+	}
+
 	/* --- Class --- */
 	class SOPublish {
-		private String fileName;
+		private String sendVendorName;
 		private ArrayList<AffectedItem> vendorAI;
 		private ArrayList<PartBom> vendorBom;
 		private ArrayList<Document> vendorDocument;
+		
+		public String getSendVendorName() {
+			return sendVendorName;
+		}
+		
+		public void setSendVendorName(String sendVendorName) {
+			this.sendVendorName = sendVendorName;
+		}
+
+		public ArrayList<AffectedItem> getVendorAI() {
+			return vendorAI;
+		}
+
+		public void setVendorAI(ArrayList<AffectedItem> vendorAI) {
+			this.vendorAI = vendorAI;
+		}
+
+		public ArrayList<PartBom> getVendorBom() {
+			return vendorBom;
+		}
+
+		public void setVendorBom(ArrayList<PartBom> vendorBom) {
+			this.vendorBom = vendorBom;
+		}
+
+		public ArrayList<Document> getVendorDocument() {
+			return vendorDocument;
+		}
+
+		public void setVendorDocument(ArrayList<Document> vendorDocument) {
+			this.vendorDocument = vendorDocument;
+		}
 
 		public boolean isVendorNameEmpty() {
-			return !Optional.ofNullable(this.fileName).isPresent();
+			return !Optional.ofNullable(this.sendVendorName).isPresent();
 		}
 
 		public boolean isVendorAIEmpty() {
@@ -1338,7 +1481,8 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 		}
 	}
 
-	class AffectedItem implements Cloneable{
+	class AffectedItem{
+		private String sendVendorName;
 		private String part;
 		private String affectedItemPart;
 		private String partName;
@@ -1349,42 +1493,322 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 		private String materialGroup;
 		private String partType;
 		private String purchasingGroup;
-		private String vendor;
-		private String referenceEO;
-		private String referencePO;
+		private String vendorPartNo;
+		private String relatedEO;
+		private String relatedPO;
 		private String altOptPart;
 		private String acNo;
 		private String remark;
-		
-		@Override
-		protected Object clone() throws CloneNotSupportedException {
-			Object cloneObj = super.clone();
-			return cloneObj;
+
+		public String getSendVendorName() {
+			return sendVendorName;
+		}
+
+		public void setSendVendorName(String sendVendorName) {
+			this.sendVendorName = sendVendorName;
+		}
+
+		public String getPart() {
+			return part;
+		}
+
+		public void setPart(String part) {
+			this.part = part;
+		}
+
+		public String getAffectedItemPart() {
+			return affectedItemPart;
+		}
+
+		public void setAffectedItemPart(String affectedItemPart) {
+			this.affectedItemPart = affectedItemPart;
+		}
+
+		public String getPartName() {
+			return partName;
+		}
+
+		public void setPartName(String partName) {
+			this.partName = partName;
+		}
+
+		public String getDocumentFile() {
+			return documentFile;
+		}
+
+		public void setDocumentFile(String documentFile) {
+			this.documentFile = documentFile;
+		}
+
+		public String getMediumPackingNums() {
+			return mediumPackingNums;
+		}
+
+		public void setMediumPackingNums(String mediumPackingNums) {
+			this.mediumPackingNums = mediumPackingNums;
+		}
+
+		public String getUnit() {
+			return unit;
+		}
+
+		public void setUnit(String unit) {
+			this.unit = unit;
+		}
+
+		public String getMaterialType() {
+			return materialType;
+		}
+
+		public void setMaterialType(String materialType) {
+			this.materialType = materialType;
+		}
+
+		public String getMaterialGroup() {
+			return materialGroup;
+		}
+
+		public void setMaterialGroup(String materialGroup) {
+			this.materialGroup = materialGroup;
+		}
+
+		public String getPartType() {
+			return partType;
+		}
+
+		public void setPartType(String partType) throws Exception {
+			this.partType = transPartType(partType);
+		}
+
+		public String getPurchasingGroup() {
+			return purchasingGroup;
+		}
+
+		public void setPurchasingGroup(String purchasingGroup) {
+			this.purchasingGroup = purchasingGroup;
+		}
+
+		public String getVendorPartNo() {
+			return vendorPartNo;
+		}
+
+		public void setVendorPartNo(String vendorPartNo) {
+			this.vendorPartNo = vendorPartNo;
+		}
+
+		public String getRelatedEO() {
+			return relatedEO;
+		}
+
+		public void setRelatedEO(String relatedEO) {
+			this.relatedEO = relatedEO;
+		}
+
+		public String getRelatedPO() {
+			return relatedPO;
+		}
+
+		public void setRelatedPO(String relatedPO) {
+			this.relatedPO = relatedPO;
+		}
+
+		public String getAltOptPart() {
+			return altOptPart;
+		}
+
+		public void setAltOptPart(String altOptPart) {
+			this.altOptPart = altOptPart;
+		}
+
+		public String getAcNo() {
+			return acNo;
+		}
+
+		public void setAcNo(String acNo) {
+			this.acNo = acNo;
+		}
+
+		public String getRemark() {
+			return remark;
+		}
+
+		public void setRemark(String remark) {
+			this.remark = remark;
+		}
+
+		private String transPartType(String partType) throws Exception {
+			return i18nNow.getRangeI18NString("SPLM_ItemSubType", partType, "zh");
 		}
 	}
 
 	class PartBom {
+		private String sendVendorName;
 		private String part;
 		private String subPart;
 		private String quantity;
 		private String groupCode;
 		private String pnc;
 		private String typeKD;
-		private String vendor;
+		private String vendorStar;
 		private String startDate;
 		private String endDate;
 		private String bomRemark;
+
+		public String getSendVendorName() {
+			return sendVendorName;
+		}
+
+		public void setSendVendorName(String sendVendorName) {
+			this.sendVendorName = sendVendorName;
+		}
+
+		public String getPart() {
+			return part;
+		}
+
+		public void setPart(String part) {
+			this.part = part;
+		}
+
+		public String getSubPart() {
+			return subPart;
+		}
+
+		public void setSubPart(String subPart) {
+			this.subPart = subPart;
+		}
+
+		public String getQuantity() {
+			return quantity;
+		}
+
+		public void setQuantity(String quantity) {
+			this.quantity = quantity;
+		}
+
+		public String getGroupCode() {
+			return groupCode;
+		}
+
+		public void setGroupCode(String groupCode) {
+			this.groupCode = groupCode;
+		}
+
+		public String getPnc() {
+			return pnc;
+		}
+
+		public void setPnc(String pnc) {
+			this.pnc = pnc;
+		}
+
+		public String getTypeKD() {
+			return typeKD;
+		}
+
+		public void setTypeKD(String typeKD) {
+			this.typeKD = transTypeKD(typeKD);
+		}
+
+		public String getVendorStar() {
+			return vendorStar;
+		}
+
+		public void setVendorStar(String vendorStar) {
+			this.vendorStar = vendorStar;
+		}
+
+		public String getStartDate() {
+			return startDate;
+		}
+
+		public void setStartDate(String startDate) {
+			this.startDate = transDate(startDate);
+		}
+
+		public String getEndDate() {
+			return endDate;
+		}
+
+		public void setEndDate(String endDate) {
+			this.endDate = transDate(endDate);
+		}
+
+		public String getBomRemark() {
+			return bomRemark;
+		}
+
+		public void setBomRemark(String bomRemark) {
+			this.bomRemark = bomRemark;
+		}
+
+		private String transTypeKD(String typeKD) {
+			return typeKD.equalsIgnoreCase("*-") ? "" : typeKD;
+		}
+
+		private String transDate(String date) {
+			return date.isEmpty() ? "" : convertDateFormat(date, "yyyyMMdd");
+		}
 	}
 
 	class Document {
+		private String sendVendorName;
 		private String picName;
 		private ArrayList<String> picFileLocations;
+
+		public String getSendVendorName() {
+			return sendVendorName;
+		}
+
+		public void setSendVendorName(String sendVendorName) {
+			this.sendVendorName = sendVendorName;
+		}
+
+		public String getPicName() {
+			return picName;
+		}
+
+		public void setPicName(String picName) {
+			this.picName = picName;
+		}
+
+		public ArrayList<String> getPicFileLocations() {
+			return picFileLocations;
+		}
+
+		public void setPicFileLocations(ArrayList<String> picFileLocations) {
+			this.picFileLocations = picFileLocations;
+		}
 	}
 
 	class PBPublish {
 		private String dealerName;
 		private ArrayList<PartBulletin> dealerPB;
 		private ArrayList<Document> dealerDocument;
+
+		public String getDealerName() {
+			return dealerName;
+		}
+
+		public void setDealerName(String dealerName) {
+			this.dealerName = dealerName;
+		}
+
+		public ArrayList<PartBulletin> getDealerPB() {
+			return dealerPB;
+		}
+
+		public void setDealerPB(ArrayList<PartBulletin> dealerPB) {
+			this.dealerPB = dealerPB;
+		}
+
+		public ArrayList<Document> getDealerDocument() {
+			return dealerDocument;
+		}
+
+		public void setDealerDocument(ArrayList<Document> dealerDocument) {
+			this.dealerDocument = dealerDocument;
+		}
 
 		public boolean isDealerNameEmpty() {
 			return !Optional.ofNullable(this.dealerName).isPresent();
@@ -1411,6 +1835,94 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 		private String endDate;
 		private String pbRemark;
 		private String adaptableMS;
+
+		public String getPart() {
+			return part;
+		}
+
+		public void setPart(String part) {
+			this.part = part;
+		}
+
+		public String getPartName() {
+			return partName;
+		}
+
+		public void setPartName(String partName) {
+			this.partName = partName;
+		}
+
+		public String getDocumentFile() {
+			return documentFile;
+		}
+
+		public void setDocumentFile(String documentFile) {
+			this.documentFile = documentFile;
+		}
+
+		public String getGroupCode() {
+			return groupCode;
+		}
+
+		public void setGroupCode(String groupCode) {
+			this.groupCode = groupCode;
+		}
+
+		public String getPnc() {
+			return pnc;
+		}
+
+		public void setPnc(String pnc) {
+			this.pnc = pnc;
+		}
+
+		public String getQuantity() {
+			return quantity;
+		}
+
+		public void setQuantity(String quantity) {
+			this.quantity = quantity;
+		}
+
+		public String getTypeKD() {
+			return typeKD;
+		}
+
+		public void setTypeKD(String typeKD) {
+			this.typeKD = typeKD;
+		}
+
+		public String getStartDate() {
+			return startDate;
+		}
+
+		public void setStartDate(String startDate) {
+			this.startDate = startDate;
+		}
+
+		public String getEndDate() {
+			return endDate;
+		}
+
+		public void setEndDate(String endDate) {
+			this.endDate = endDate;
+		}
+
+		public String getPbRemark() {
+			return pbRemark;
+		}
+
+		public void setPbRemark(String pbRemark) {
+			this.pbRemark = pbRemark;
+		}
+
+		public String getAdaptableMS() {
+			return adaptableMS;
+		}
+
+		public void setAdaptableMS(String adaptableMS) {
+			this.adaptableMS = adaptableMS;
+		}
 	}
 
 	class SOPBTitle {
@@ -1422,5 +1934,69 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 		private String titleReleaseDate;
 		private boolean releaseSO;
 		private boolean releasePB;
+
+		public String getTitleName() {
+			return titleName;
+		}
+
+		public void setTitleName(String titleName) {
+			this.titleName = titleName;
+		}
+
+		public String getTitleIssuer() {
+			return titleIssuer;
+		}
+
+		public void setTitleIssuer(String titleIssuer) {
+			this.titleIssuer = titleIssuer;
+		}
+
+		public String getTitleVault() {
+			return titleVault;
+		}
+
+		public void setTitleVault(String titleVault) {
+			this.titleVault = titleVault;
+		}
+
+		public String getTitleOwner() {
+			return titleOwner;
+		}
+
+		public void setTitleOwner(String titleOwner) {
+			this.titleOwner = titleOwner;
+		}
+
+		public String getTitleSendDept() {
+			return titleSendDept;
+		}
+
+		public void setTitleSendDept(String titleSendDept) {
+			this.titleSendDept = titleSendDept;
+		}
+
+		public String getTitleReleaseDate() {
+			return titleReleaseDate;
+		}
+
+		public void setTitleReleaseDate(String titleReleaseDate) {
+			this.titleReleaseDate = titleReleaseDate;
+		}
+
+		public boolean isReleaseSO() {
+			return releaseSO;
+		}
+
+		public void setReleaseSO(boolean releaseSO) {
+			this.releaseSO = releaseSO;
+		}
+
+		public boolean isReleasePB() {
+			return releasePB;
+		}
+
+		public void setReleasePB(boolean releasePB) {
+			this.releasePB = releasePB;
+		}
 	}
 }

@@ -19,6 +19,7 @@ import com.matrixone.apps.domain.DomainObject;
 import com.matrixone.apps.domain.DomainRelationship;
 import com.matrixone.apps.domain.util.MapList;
 import com.matrixone.apps.domain.util.MqlUtil;
+import com.matrixone.apps.domain.util.i18nNow;
 
 import matrix.db.Context;
 import matrix.util.StringList;
@@ -26,9 +27,9 @@ import matrix.util.StringList;
 public class SPLM_ImageRecognition_JPO_mxJPO {
 	
 	// java called python for Image recognition
-	private static final String PICTURES_PATH = "E:\\temp\\morga\\Pic";
+	private static final String PICTURES_PATH = "C:\\TEMP\\Morga\\python\\Pic";
 	private final String exe = "python"; // 編譯器
-	private final String codingCommand = "E:\\temp\\morga\\CMC_Recognize_V99.py";
+	private final String command = "C:\\TEMP\\Morga\\python\\CMC_Recognize_V99.py";
 	
 	// java connect oracle with JDBC setting
 	// This is for juichi 10.0.0.24 enviroment
@@ -38,10 +39,42 @@ public class SPLM_ImageRecognition_JPO_mxJPO {
 	
 	// java connect oracle with JDBC setting
 	// This is for CMC 172.20.24.91 enviroment
-	private final String EPC_DB_URL = "jdbc:oracle:thin:@172.20.24.91:1521/plmtst";
-	private final String EPC_DB_USERNAME = "EPC";
-	private final String EPC_DB_PASSWORD = "splm@CMC2021";
+	// private final String EPC_DB_URL = "jdbc:oracle:thin:@172.20.24.91:1521/plmtst";
+	// private final String EPC_DB_USERNAME = "EPC";
+	// private final String EPC_DB_PASSWORD = "splm@CMC2021";
+	
+	private final String PLM_ENV = System.getenv("PLM_ENV");
+	private final String EPC_DB_IP = "EPC.DB.IP";
+	private final String EPC_DB_PORT = "EPC.DB.Port";
+	private final String EPC_DB_SID = "EPC.DB.SID";
+	private final String EPC_DB_USER = "EPC.DB.User";
+	private final String EPC_DB_PASSWORD = "EPC.DB.Password";
+	
+	/* DB connect */
+	private String getERC_DB_URL() throws Exception {
+		return "jdbc:oracle:thin:@" + getProperty(EPC_DB_IP)+ ":" + getProperty(EPC_DB_PORT) + "/" + getProperty(EPC_DB_SID);
+	}
 
+	private String getERC_DB_USER() throws Exception {
+		return getProperty(EPC_DB_USER);
+	}
+
+	private String getERC_DB_PASSWORD() throws Exception {
+		return getProperty(EPC_DB_PASSWORD);
+	}
+	
+	private String getProperty(String keyStr) throws Exception {
+		if (!"PRD,UAT".contains(PLM_ENV)) {
+			throw new IllegalArgumentException(PLM_ENV + " is not PRD / UAT Enviroment");
+		}
+		String url = i18nNow.getI18nString(keyStr + "." + PLM_ENV, "emxSPLM", "");
+		if (url.equals(keyStr + "." + PLM_ENV)) {
+			throw new IllegalArgumentException("emxSPLM Property not found : " + keyStr + "." + PLM_ENV);
+		}
+		return url;
+	}
+	
+	/*--------------------------------------------------*/
 	/**
 	 * Expand Image and Gain bus Image to CheckoutFile with format generic
 	 * @param context
@@ -49,6 +82,11 @@ public class SPLM_ImageRecognition_JPO_mxJPO {
 	 * @throws Exception
 	 */
 	public void scanGroupDrawing(Context context, String[] args) throws Exception {
+		
+		File picDownloadTempFile = new File(PICTURES_PATH);
+		if (picDownloadTempFile.exists() != true) {
+			picDownloadTempFile.mkdirs();
+		}
 
 		StringList relSelects = new StringList();
 		StringList busSelects = new StringList();
@@ -59,7 +97,7 @@ public class SPLM_ImageRecognition_JPO_mxJPO {
 
 		// 1. find groupDrawingObj which has Scanning or null for
 		// attribute[SPLM_ScanStatus]
-		MapList groupDrawingList = DomainObject.findObjects(context, "SPLM_GroupDrawing", // type
+		MapList groupDrawingMapList = DomainObject.findObjects(context, "SPLM_GroupDrawing", // type
 				"*", // name
 				"*", // revision
 				"*", // owner
@@ -67,17 +105,17 @@ public class SPLM_ImageRecognition_JPO_mxJPO {
 				"attribute[SPLM_ScanStatus]=='' or attribute[SPLM_ScanStatus]=='Scanning'", // where
 				null, false, busSelects, (short) 0);
 
-		Iterator groupDrawingItr = groupDrawingList.iterator();
-		DomainObject groupDrawingObj = new DomainObject();
+		Iterator groupDrawingItr = groupDrawingMapList.iterator();
+		DomainObject groupDrawingDomObj = new DomainObject();
 		while (groupDrawingItr.hasNext()) {
-
 			Map groupDrawingMap = (Map) groupDrawingItr.next();
 			String groupDrawingId = (String) groupDrawingMap.get(DomainConstants.SELECT_ID);
 			String groupDrawingName = (String) groupDrawingMap.get(DomainConstants.SELECT_NAME);
-			groupDrawingObj.setId(groupDrawingId);
+			String groupDrawingRevision = (String) groupDrawingMap.get(DomainConstants.SELECT_REVISION);
+			groupDrawingDomObj.setId(groupDrawingId);
 
 			// 2. download each groupDrawing which has Image picture on it
-			MapList imageList = groupDrawingObj.getRelatedObjects(context, "SPLM_GroupDrawingImage", // relationshipPattern,
+			MapList imageMapList = groupDrawingDomObj.getRelatedObjects(context, "SPLM_GroupDrawingImage", // relationshipPattern,
 					"Image", // typePattern,
 					busSelects, // StringList objectSelects,
 					relSelects, // StringList relationshipSelects,
@@ -87,49 +125,54 @@ public class SPLM_ImageRecognition_JPO_mxJPO {
 					"", // String objectWhere,
 					"", // String relationshipWhere
 					1); // int limit)
+		
+			if(imageMapList.size() < 1) {
+				continue;
+			}
 
 			// checkout file and doing image recognize in same time / each picture
-			Iterator imageItr = imageList.iterator();
+			DomainObject imageDomObj = new DomainObject();
+			Iterator imageItr = imageMapList.iterator();
 			while (imageItr.hasNext()) {
-				ArrayList<PncCoordinates> pncArrayList = new ArrayList<PncCoordinates>();
-				Map imageMap = (Map) imageItr.next();
-				String imageName = (String) imageMap.get(DomainConstants.SELECT_NAME);
-				String imageId = (String) imageMap.get(DomainConstants.SELECT_ID);
-				String imageRevision = (String) imageMap.get(DomainConstants.SELECT_REVISION);
-				String imageGeneric = (String) imageMap.get(DomainConstants.SELECT_FORMAT_GENERIC);
+				ArrayList<PncCoordinates> pncCoordinatesArray = new ArrayList<PncCoordinates>();
+				Map<String, String> imageMap = (Map) imageItr.next();
+				String imageName = imageMap.get(DomainConstants.SELECT_NAME);
+				String imageId = imageMap.get(DomainConstants.SELECT_ID);
+				String imageGeneric = imageMap.get(DomainConstants.SELECT_FORMAT_GENERIC);
 
 				if (!imageGeneric.isEmpty()) {
 					System.out.println("imageName : " + imageName + " exist. Downloading now.");
-					DomainObject imageObj = new DomainObject(imageId);
+					imageDomObj.setId(imageId);
 					
+					// download Picture
 					MqlUtil.mqlCommand(context, "trigger off");
-					imageObj.checkoutFile(context, false, "generic", imageGeneric, PICTURES_PATH);
+					imageDomObj.checkoutFile(context, false, "generic", imageGeneric, PICTURES_PATH);
 					MqlUtil.mqlCommand(context, "trigger on");
 
 					// 3. image recognize
-					pncArrayList = run(context, imageGeneric);
-					// 4. uploadPnc
-					uploadPncCoordinatesToEPC(pncArrayList, imageName, imageRevision);
+					pncCoordinatesArray = this.run(context, imageGeneric);
+					// 4. upload PNC coordinates data
+					this.uploadPncCoordinatesToEPC(pncCoordinatesArray, groupDrawingName, groupDrawingRevision);
 				}
 
 				// 5. connect groupDrawing / pnc with relationship[SPLM_Related_PNC]
-				StringList pncList = groupDrawingObj.getInfoList(context, "from[SPLM_Related_PNC].to.id");
-				for (PncCoordinates pncData : pncArrayList) {
-					String pnc = pncData.pnc;
-					String pncId = pncData.pncId;
+				StringList pncList = groupDrawingDomObj.getInfoList(context, "from[SPLM_Related_PNC].to.id");
+				for (PncCoordinates pncCoordinates : pncCoordinatesArray) {
+					String pnc = pncCoordinates.pnc;
+					String pncId = pncCoordinates.pncId;
 					if (pncList.contains(pncId)) {
 						continue;
 					}
 
-					System.out.println("pic Name: " + groupDrawingName + " ,pnc id : " + pncId + " ,pnc : " + pnc);
-					DomainRelationship.connect(context, groupDrawingObj, "SPLM_Related_PNC", new DomainObject(pncId));
+					System.out.println("GroupDrawing Name: " + groupDrawingName + " ,pnc id : " + pncId + " ,pnc : " + pnc);
+					DomainRelationship.connect(context, groupDrawingDomObj, "SPLM_Related_PNC", new DomainObject(pncId));
 					pncList.add(pncId);
 				}
 				System.out.println("PNC / GroupDrawing relationship[SPLM_RelatedGroupDrawing] Connect succeed.");
 			}
 			
 			// 6. change groupDrawing attribute[ScanStatus] to ScanComplete
-			groupDrawingObj.setAttributeValue(context, "SPLM_ScanStatus", "ScanComplete");
+			groupDrawingDomObj.setAttributeValue(context, "SPLM_ScanStatus", "ScanComplete");
 			System.out.println("SPLM_GroupDrawing.attribute[SPLM_ScanStatus] change succeed.");
 			System.out.println();
 		}
@@ -144,7 +187,7 @@ public class SPLM_ImageRecognition_JPO_mxJPO {
 	 * @return
 	 * @throws Exception
 	 */
-	public ArrayList<PncCoordinates> run(Context context, String imageGeneric) throws Exception {
+	private ArrayList<PncCoordinates> run(Context context, String imageGeneric) throws Exception {
 		String picturePath = PICTURES_PATH + "\\" + imageGeneric;
 		Gson gson = new Gson();
 		ArrayList<PncCoordinates> pncArrayList = new ArrayList<PncCoordinates>();
@@ -205,7 +248,7 @@ public class SPLM_ImageRecognition_JPO_mxJPO {
 		BufferedReader br = null;
 		String line = null;
 		StringBuffer sb = new StringBuffer();
-		String[] cmdImportData = new String[] { exe, codingCommand, picturePath };
+		String[] cmdImportData = new String[] { exe, command, picturePath };
 		
 		try {
 			proc = Runtime.getRuntime().exec(cmdImportData);
@@ -214,13 +257,13 @@ public class SPLM_ImageRecognition_JPO_mxJPO {
 			while ((line = br.readLine()) != null) {
 				sb.append(line);
 			}
-		} catch (IOException e) {
-			e.printStackTrace();
+		} catch (Exception e) {
+			System.out.println("Method imageRecognition<Part1> : " + e.getMessage());
 		} finally {
 			try {
 				br.close();
-			} catch (IOException e) {
-				e.printStackTrace();
+			} catch (IOException e2) {
+				System.out.println("Method imageRecognition<Part1> : " + e2.getMessage());
 			}
 			proc.destroy();
 		}
@@ -233,14 +276,15 @@ public class SPLM_ImageRecognition_JPO_mxJPO {
 	 * 
 	 * @param datas
 	 */
-	private void uploadPncCoordinatesToEPC(ArrayList<PncCoordinates> pncArrayLists, String imageName, String imageRevision) {
-		System.out.println("uploading...");
+	private void uploadPncCoordinatesToEPC(ArrayList<PncCoordinates> pncArrayLists, String groupDrawingName, String groupDrawingRevision) {
+		System.out.println("Oracle Data Uploading...");
 		Connection connection = null;
 		Statement statement = null;
 		ResultSet result = null;
 		PreparedStatement pStatement = null;
+		
 		try {
-			connection = DriverManager.getConnection(EPC_DB_URL, EPC_DB_USERNAME, EPC_DB_PASSWORD);
+			connection = DriverManager.getConnection(getERC_DB_URL(), getERC_DB_USER(), getERC_DB_PASSWORD());
 			connection.setAutoCommit(false);
 			String sqlString = "INSERT INTO EPC_PNC_COORDINATES(GROUP_DRAWING_NO,PNC_NO,X_AXIS,Y_AXIS,X_LENGTH,Y_LENGTH,GROUP_DRAWING_REV)"
 					+ " Select ?, ?, ?, ?, ?, ?, ? from dual"
@@ -254,65 +298,66 @@ public class SPLM_ImageRecognition_JPO_mxJPO {
 				int width = pncObj.width; // X_LENGTH
 				int height = pncObj.height; // Y_LENGTH
 
-				pStatement.setString(1, imageName); // GROUP_DRAWING_NO
+				pStatement.setString(1, groupDrawingName); // GROUP_DRAWING_NO
 				pStatement.setString(2, pncNams); // PNC_NO
 				pStatement.setInt(3, x); // X_AXIS
 				pStatement.setInt(4, y); // Y_AXIS
 				pStatement.setInt(5, width); // X_LENGTH
 				pStatement.setInt(6, height); // Y_LENGTH
-				pStatement.setString(7, imageRevision); // GROUP_DRAWING_REV
+				pStatement.setString(7, groupDrawingRevision); // GROUP_DRAWING_REV
 				pStatement.setString(8, pncNams); // PNC_NO
-				pStatement.setString(9, imageName); // GROUP_DRAWING_NO
-				pStatement.setString(10, imageRevision); // GROUP_DRAWING_REV
+				pStatement.setString(9, groupDrawingName); // GROUP_DRAWING_NO
+				pStatement.setString(10, groupDrawingRevision); // GROUP_DRAWING_REV
 				pStatement.setInt(11, x); // X_AXIS
 				pStatement.setInt(12, y); // Y_AXIS
 				pStatement.addBatch();
 			}
 			int[] count = pStatement.executeBatch();
 			connection.commit();
+			System.out.println("Inserted data : " + count.length);
 			System.out.println("Inserted records into the table EPC_PNC_COORDINATES now... ");
-		} catch (SQLException e) {
-			e.printStackTrace();
+		} catch (Exception e) {
+			System.out.println("(Error) Method uploadPncCoordinatesToEPC<Oracle> : " + e.getMessage());
 			if (connection != null) {
 				try {
-					System.err.println("Transaction is being rolled back");
+					System.out.println("Transaction is being rolled back");
 					connection.rollback();
 				} catch (SQLException e2) {
-					e2.printStackTrace();
+					System.out.println("(Error) Method uploadPncCoordinatesToEPC<connection.rollback> : " + e2.getMessage());
 				}
 			}
 		} finally {
 			try {
 				connection.setAutoCommit(true);
 			} catch (SQLException e) {
-				e.printStackTrace();
+				System.out.println("(Error) Method uploadPncCoordinatesToEPC<connection.setAutoCommit> : " + e.getMessage());
 			}
 			if (result != null) {
 				try {
 					result.close();
 				} catch (SQLException e) {
-					e.printStackTrace();
+					System.out.println("(Error) Method uploadPncCoordinatesToEPC<result> : " + e.getMessage());
 				}
 			}
 			if (statement != null) {
 				try {
 					statement.close();
 				} catch (SQLException e) {
-					e.printStackTrace();
+					System.out.println("(Error) Method uploadPncCoordinatesToEPC<statement> : " + e.getMessage());
 				}
 			}
 			if (connection != null) {
 				try {
 					connection.close();
 				} catch (SQLException e) {
-					e.printStackTrace();
+					System.out.println("(Error) Method uploadPncCoordinatesToEPC<connection> : " + e.getMessage());
 				}
 			}
 			if (pStatement != null) {
 				try {
 					pStatement.close();
 				} catch (SQLException e) {
-					e.printStackTrace();
+					System.out.println("(Error) Method uploadPncCoordinatesToEPC<pStatement> : " + e.getMessage());
 				}
 			}
 		}
@@ -320,11 +365,59 @@ public class SPLM_ImageRecognition_JPO_mxJPO {
 	}
 
 	public class PncCoordinates {
-		public String pnc; // PNC_NO
-		public int width; // X_LENGTH
-		public int height; // Y_LENGTH
-		public int x; // X_AXIS
-		public int y; // Y_AXIS
-		public String pncId;
+		private String pnc; // PNC_NO
+		private String pncId;
+		private int width; // X_LENGTH
+		private int height; // Y_LENGTH
+		private int x; // X_AXIS
+		private int y; // Y_AXIS
+		
+		public String getPnc() {
+			return pnc;
+		}
+		
+		public void setPnc(String pnc) {
+			this.pnc = pnc;
+		}
+		
+		public String getPncId() {
+			return pncId;
+		}
+		
+		public void setPncId(String pncId) {
+			this.pncId = pncId;
+		}
+		
+		public int getWidth() {
+			return width;
+		}
+		
+		public void setWidth(int width) {
+			this.width = width;
+		}
+		
+		public int getHeight() {
+			return height;
+		}
+		
+		public void setHeight(int height) {
+			this.height = height;
+		}
+		
+		public int getX() {
+			return x;
+		}
+		
+		public void setX(int x) {
+			this.x = x;
+		}
+		
+		public int getY() {
+			return y;
+		}
+		
+		public void setY(int y) {
+			this.y = y;
+		}
 	}
 }
