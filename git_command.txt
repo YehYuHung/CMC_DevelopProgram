@@ -87,6 +87,18 @@ n 是最近幾多次的提交記錄，只顯示最近更動的筆數
 -> git log 如何退出當前 log 狀態？ 
    英文按鍵狀態下按下q鍵即可退出。
 
+------------------------------------------------------
+$ git branch <branchName>
+建立 branchName 分支
+若是不給 branchName , 則表示顯示現有的branch有哪些 , * 代表現在的分支位置
+
+$ git checkout <branchName>
+切換分支到 branchName
+若是想要切換跟建立同時 , 則可以加入 -b ($ git checkout -b <branchName>) 表示
+
+$ git branch -d <branch>
+刪除分支，加入 -d 方式刪除。
+------------------------------------------------------
 
 git dash 可以使用cmd類似的指令：
  
