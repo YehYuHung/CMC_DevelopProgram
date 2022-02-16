@@ -44,6 +44,12 @@ remote github 上傳
 $ git remote add origin git_Repository_URL
 設定本地端git資料夾與github上傳端的連結對象，以確保資料不會上傳錯誤地方
 
+$ git branch -M main
+設定當前 branch 名稱更換為 main
+
+$ git push -u origin main
+存放在 github 裡面的分支改為 main
+
 $ git remote -v
 檢查git連結端github repository位置
 
