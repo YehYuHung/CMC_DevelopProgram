@@ -26,7 +26,7 @@ import matrix.util.StringList;
 
 public class SPLM_ImageRecognition_JPO_mxJPO {
 	
-	// java called python for Image recognition
+	// Java 呼叫 Python 執行辨識程式 (路徑位置不一需調整)
 	private static final String PICTURES_PATH = "C:\\TEMP\\Morga\\python\\Pic";
 	private final String exe = "python"; // 編譯器
 	private final String command = "C:\\TEMP\\Morga\\python\\CMC_Recognize_V99.py";
@@ -41,7 +41,7 @@ public class SPLM_ImageRecognition_JPO_mxJPO {
 	// This is for CMC 172.20.24.91 enviroment
 	// private final String EPC_DB_URL = "jdbc:oracle:thin:@172.20.24.91:1521/plmtst";
 	// private final String EPC_DB_USERNAME = "EPC";
-	// private final String EPC_DB_PASSWORD = "splm@CMC2021";
+	// private final String EPC_DB_PASSWORD = "splm@CMC2021";/
 	
 	private final String PLM_ENV = System.getenv("PLM_ENV");
 	private final String EPC_DB_IP = "EPC.DB.IP";
@@ -50,7 +50,7 @@ public class SPLM_ImageRecognition_JPO_mxJPO {
 	private final String EPC_DB_USER = "EPC.DB.User";
 	private final String EPC_DB_PASSWORD = "EPC.DB.Password";
 	
-	/* DB connect */
+	/* DB資料庫 連接設定 */
 	private String getERC_DB_URL() throws Exception {
 		return "jdbc:oracle:thin:@" + getProperty(EPC_DB_IP)+ ":" + getProperty(EPC_DB_PORT) + "/" + getProperty(EPC_DB_SID);
 	}
@@ -76,7 +76,7 @@ public class SPLM_ImageRecognition_JPO_mxJPO {
 	
 	/*--------------------------------------------------*/
 	/**
-	 * Expand Image and Gain bus Image to CheckoutFile with format generic
+	 * 確認含有Image物件的GroupDrawing，下載並辨識PNC資料
 	 * @param context
 	 * @param args
 	 * @throws Exception
@@ -126,7 +126,7 @@ public class SPLM_ImageRecognition_JPO_mxJPO {
 					"", // String relationshipWhere
 					1); // int limit)
 		
-			if(imageMapList.size() < 1) {
+			if(imageMapList.isEmpty()) {
 				continue;
 			}
 
@@ -151,27 +151,32 @@ public class SPLM_ImageRecognition_JPO_mxJPO {
 
 					// 3. image recognize
 					pncCoordinatesArray = this.run(context, imageGeneric);
-					// 4. upload PNC coordinates data
+					// 4. delete PNC coordinates data
+					this.deletePncCoordinatesOnEPCDataBase(groupDrawingName, groupDrawingRevision);
+					// 5. upload PNC coordinates data
 					this.uploadPncCoordinatesToEPC(pncCoordinatesArray, groupDrawingName, groupDrawingRevision);
 				}
 
-				// 5. connect groupDrawing / pnc with relationship[SPLM_Related_PNC]
-				StringList pncList = groupDrawingDomObj.getInfoList(context, "from[SPLM_Related_PNC].to.id");
+				// 6. disconnect Then connect groupDrawing / pnc with relationship[SPLM_Related_PNC]
+				StringList relatedPncList = groupDrawingDomObj.getInfoList(context, "from[SPLM_Related_PNC].id");
+				DomainRelationship.disconnect(context, relatedPncList.toStringArray());
+				
+				ArrayList<String> filterList = new ArrayList<String>();
 				for (PncCoordinates pncCoordinates : pncCoordinatesArray) {
-					String pnc = pncCoordinates.pnc;
-					String pncId = pncCoordinates.pncId;
-					if (pncList.contains(pncId)) {
+					String pnc = pncCoordinates.getPnc();
+					String pncId = pncCoordinates.getPncId();
+					if (filterList.contains(pncId)) {
 						continue;
 					}
 
 					System.out.println("GroupDrawing Name: " + groupDrawingName + " ,pnc id : " + pncId + " ,pnc : " + pnc);
 					DomainRelationship.connect(context, groupDrawingDomObj, "SPLM_Related_PNC", new DomainObject(pncId));
-					pncList.add(pncId);
+					filterList.add(pncId);
 				}
 				System.out.println("PNC / GroupDrawing relationship[SPLM_RelatedGroupDrawing] Connect succeed.");
 			}
 			
-			// 6. change groupDrawing attribute[ScanStatus] to ScanComplete
+			// 7. change groupDrawing attribute[ScanStatus] to ScanComplete
 			groupDrawingDomObj.setAttributeValue(context, "SPLM_ScanStatus", "ScanComplete");
 			System.out.println("SPLM_GroupDrawing.attribute[SPLM_ScanStatus] change succeed.");
 			System.out.println();
@@ -180,8 +185,7 @@ public class SPLM_ImageRecognition_JPO_mxJPO {
 	}
 
 	/**
-	 * parse picture and gain datas with ArrayList
-	 * 
+	 * 解析資料，確認PNC資料是否存在
 	 * @param context
 	 * @param imageGeneric
 	 * @return
@@ -201,35 +205,33 @@ public class SPLM_ImageRecognition_JPO_mxJPO {
 
 		// recognize and get from json to string type back
 		String imageRecognizeStr = imageRecognition(picturePath);
-		if (!imageRecognizeStr.isEmpty()) {
-			
-			StringList busSelects = new StringList(DomainConstants.SELECT_ID);
-			ArrayList<PncCoordinates> imageRecognizeDatas = gson.fromJson(imageRecognizeStr,
-					new TypeToken<ArrayList<PncCoordinates>>() {}.getType());
-			
-			// restore existed pnc into new ArrayList 
-			for (PncCoordinates pncData : imageRecognizeDatas) {
-
-				String pncName = pncData.pnc;
-				MapList pncExistsList = DomainObject.findObjects(context, "SPLM_PNC", // type
-						pncName, // name
-						"-", // revision
-						"*", // owner
-						"eService Production", // vault
-						"", // where
-						null, false, busSelects, (short) 0);
-
-				if (pncExistsList.isEmpty()) {
-					continue;
-				}
-				
-				pncData.pncId = (String) ((Map) pncExistsList.get(0)).get(DomainConstants.SELECT_ID);
-				pncArrayList.add(pncData);
-			}
-		} else {
+		if (imageRecognizeStr.isEmpty()) {
 			System.out.println(picturePath + " can't recognize any pnc.");
+			return pncArrayList;
 		}
+			
+		StringList busSelects = new StringList(DomainConstants.SELECT_ID);
+		ArrayList<PncCoordinates> imageRecognizeDatas = gson.fromJson(imageRecognizeStr,
+				new TypeToken<ArrayList<PncCoordinates>>() {}.getType());
+			
+		// restore existed pnc into new ArrayList 
+		for (PncCoordinates pncData : imageRecognizeDatas) {
+			MapList pncExistsList = DomainObject.findObjects(context, "SPLM_PNC", // type
+					pncData.getPnc(), // name
+					"-", // revision
+					"*", // owner
+					"eService Production", // vault
+					"", // where
+					null, false, busSelects, (short) 0);
 
+			if (pncExistsList.isEmpty()) {
+				continue;
+			}
+				
+			pncData.pncId = (String) ((Map) pncExistsList.get(0)).get(DomainConstants.SELECT_ID);
+			pncArrayList.add(pncData);
+		}
+		
 		if (file.delete()) {
 			System.out.println("Delete " + file.toString() + " successful.");
 		}
@@ -238,8 +240,7 @@ public class SPLM_ImageRecognition_JPO_mxJPO {
 	}
 
 	/**
-	 * Call python and retrun result back to package datas.
-	 * 
+	 * 呼叫Python程式執行辨識，並獲取資料
 	 * @param picturePath
 	 * @return sb.toString()
 	 */
@@ -272,8 +273,87 @@ public class SPLM_ImageRecognition_JPO_mxJPO {
 	}
 
 	/**
-	 * upload PNC to table EPC_PNC_COORDINATES
-	 * 
+	 * 重新辨識 / 首次辨識 -> 資料須先刪除
+	 * @param groupDrawingName
+	 * @param groupDrawingRevision
+	 */
+	private void deletePncCoordinatesOnEPCDataBase(String groupDrawingName, String groupDrawingRevision) {
+		System.out.println("Oracle Data Deleting...");
+		Connection connection = null;
+		Statement statement = null;
+		ResultSet result = null;
+		PreparedStatement pStatement = null;
+		
+		try {
+			connection = DriverManager.getConnection(getERC_DB_URL(), getERC_DB_USER(), getERC_DB_PASSWORD());
+			connection.setAutoCommit(false);
+			String sqlString = "DELETE FROM EPC_PNC_COORDINATES"
+					+ " WHERE EXISTS"
+					+ " (SELECT * FROM EPC_PNC_COORDINATES WHERE GROUP_DRAWING_NO = ? and GROUP_DRAWING_REV=?)" // <- Import, if don't have this, your ODBC will be lock and couldn't commit!
+					+ " and GROUP_DRAWING_NO = ? and GROUP_DRAWING_REV=?";
+			pStatement = connection.prepareStatement(sqlString);
+
+			pStatement.setString(1, groupDrawingName); // GROUP_DRAWING_NO
+			pStatement.setString(2, groupDrawingRevision); // GROUP_DRAWING_REV
+			pStatement.setString(3, groupDrawingName); // GROUP_DRAWING_NO
+			pStatement.setString(4, groupDrawingRevision); // GROUP_DRAWING_REV
+
+			pStatement.addBatch();
+			int[] count = pStatement.executeBatch();
+			
+			connection.commit();
+			System.out.println("Delete data : " + count.length);
+			System.out.println("Delete GroupDrawing Data in the table EPC_PNC_COORDINATES now... ");
+		} catch (Exception e) {
+			System.out.println("(Error) Method deletePncCoordinatesOnEPCDataBase<Oracle> : " + e.getMessage());
+			if (connection != null) {
+				try {
+					System.out.println("Transaction is being rolled back");
+					connection.rollback();
+				} catch (SQLException e2) {
+					System.out.println("(Error) Method deletePncCoordinatesOnEPCDataBase<connection.rollback> : " + e2.getMessage());
+				}
+			}
+		} finally {
+			try {
+				connection.setAutoCommit(true);
+			} catch (SQLException e) {
+				System.out.println("(Error) Method deletePncCoordinatesOnEPCDataBase<connection.setAutoCommit> : " + e.getMessage());
+			}
+			if (result != null) {
+				try {
+					result.close();
+				} catch (SQLException e) {
+					System.out.println("(Error) Method deletePncCoordinatesOnEPCDataBase<result> : " + e.getMessage());
+				}
+			}
+			if (statement != null) {
+				try {
+					statement.close();
+				} catch (SQLException e) {
+					System.out.println("(Error) Method deletePncCoordinatesOnEPCDataBase<statement> : " + e.getMessage());
+				}
+			}
+			if (connection != null) {
+				try {
+					connection.close();
+				} catch (SQLException e) {
+					System.out.println("(Error) Method deletePncCoordinatesOnEPCDataBase<connection> : " + e.getMessage());
+				}
+			}
+			if (pStatement != null) {
+				try {
+					pStatement.close();
+				} catch (SQLException e) {
+					System.out.println("(Error) Method deletePncCoordinatesOnEPCDataBase<pStatement> : " + e.getMessage());
+				}
+			}
+		}
+		System.out.println("Deleting all GroupDrawing Done");
+	}
+	
+	/**
+	 * PNC資料 寫入 DB table<EPC_PNC_COORDINATES>
 	 * @param datas
 	 */
 	private void uploadPncCoordinatesToEPC(ArrayList<PncCoordinates> pncArrayLists, String groupDrawingName, String groupDrawingRevision) {
@@ -292,11 +372,11 @@ public class SPLM_ImageRecognition_JPO_mxJPO {
 			pStatement = connection.prepareStatement(sqlString);
 
 			for (PncCoordinates pncObj : pncArrayLists) {
-				String pncNams = pncObj.pnc; // PNC_NO
-				int x = pncObj.x; // X_AXIS
-				int y = pncObj.y; // Y_AXIS
-				int width = pncObj.width; // X_LENGTH
-				int height = pncObj.height; // Y_LENGTH
+				String pncNams = pncObj.getPnc(); // PNC_NO
+				int x = pncObj.getX(); // X_AXIS
+				int y = pncObj.getY(); // Y_AXIS
+				int width = pncObj.getWidth(); // X_LENGTH
+				int height = pncObj.getHeight(); // Y_LENGTH
 
 				pStatement.setString(1, groupDrawingName); // GROUP_DRAWING_NO
 				pStatement.setString(2, pncNams); // PNC_NO

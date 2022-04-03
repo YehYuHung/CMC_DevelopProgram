@@ -63,7 +63,7 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 	private static final String SO_EXCEL = "SO.EXCEL.FTP";
 	private static final String SO_PICLOCATION = "\u5716\u6a94";
 	
-	/* --- FTP Connect --- */
+	/* --- FTP 連接 (詳情可問原作者 David)--- */
 	private void sendExeclToFTP(File file) throws Exception{
 		String ftpHost = i18nNow.getI18nString(SO_EXCEL + ".HOST." + PLM_ENV, "emxSPLM", ""); 
 		String ftpFolder = i18nNow.getI18nString(SO_EXCEL + ".FOLDER." + PLM_ENV, "emxSPLM", ""); 
@@ -102,7 +102,7 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 		}
 	}
 
-	/* --- can using method - Testing OK --- */
+	/* --- 一般function 使用區 --- */
 	private String getTempFolderPath() throws Exception {
 		if (new File(TEMP_FOLDER_DEVICE).exists()) {
 			return TEMP_FOLDER_DEVICE + TEMP_FOLDER;
@@ -259,7 +259,7 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 	}
 	
 	/**
-	 * Lock Excel All Sheet with UUID
+	 * Excel 上鎖每個sheet (利用UUID)
 	 * @param context
 	 * @param soObj
 	 * @param busSelect
@@ -338,7 +338,7 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 
     }
 	
-	/* ---Dassault API package simple using--- */
+	/* --- Dassault API 簡單封裝使用查詢區 --- */
 	private MapList getSOAI(Context context, DomainObject soObj, StringList busSelect) throws Exception {
 		return getSOAI(context, soObj, busSelect, "");
 	}
@@ -441,6 +441,11 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 		DomainObject docVerDomObj = new DomainObject();
 		for(String docId : docIdStringList) {
 			docDomObj.setId(docId);
+			// Delete type == SPLM_SODocument
+			if( !"SPLM_SODocument".equalsIgnoreCase(docDomObj.getInfo(context, DomainConstants.SELECT_TYPE))) {
+				continue;
+			}
+			
 			StringList docVerIdList = docDomObj.getInfoList(context, "from[Active Version].to.id");
 			for(String docVerId : docVerIdList) {
 				docVerDomObj.setId(docVerId);
@@ -672,7 +677,10 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 			altOptPart = String.join(FORCE_BREAKLINE, optAltArrayList);
 
 			// colorPart ACNO/CPNO
-			String partACNO = colorPartACNO.isEmpty() ? "" : (colorPartACNO + "_" + FORCE_BREAKLINE + colorPartCPNO);
+			String partACNO = "";
+			if( !colorPartACNO.isEmpty() && !colorPartCPNO.isEmpty() ) {
+				partACNO = colorPartACNO.isEmpty() ? "" : (colorPartACNO + "_" + FORCE_BREAKLINE + String.join(FORCE_BREAKLINE, colorPartCPNO.split("~QWE~")));				
+			}
 
 			// vendor all through rel[SPLM_RelatedVendor].vendor.attribute[]==TRUE
 			MapList vendorPartNoMapList = getRelatedVendor(context, partDomObj, vendorBusSelects, vendorRelSelects);
@@ -722,6 +730,7 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 		sBomRelSelects.add("attribute[SPLM_EnableDate]"); // Start Date
 		sBomRelSelects.add("attribute[SPLM_DisableDate]"); // End Date
 		sBomRelSelects.add("attribute[SPLM_BOM_Note]"); // Bom remark
+		sBomRelSelects.add("attribute[SPLM_SendSubPartToERP]"); // ERP sending Request
 
 		StringList subPartVendorBusSelects = new StringList();
 		subPartVendorBusSelects.add(DomainConstants.SELECT_NAME);
@@ -770,6 +779,7 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 				String subPartStartDate = subPartMap.get("attribute[SPLM_EnableDate]");
 				String subPartEndDate = subPartMap.get("attribute[SPLM_DisableDate]");
 				String subPartBomRemark = subPartMap.get("attribute[SPLM_BOM_Note]");
+				String subPartSendToERP = subPartMap.get("attribute[SPLM_SendSubPartToERP]");
 				String subPartStartVendor = "";
 
 				subPartDomObj.setId(subPartId);
@@ -783,6 +793,11 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 							.map(obj -> (String) ((Map) obj).get(DomainConstants.SELECT_NAME))
 							.collect(Collectors.joining(FORCE_BREAKLINE));
 				}
+				
+				if( subPartSendToERP.equals("N")) {
+					subPartKDType = "";
+				}
+
 
 				for (String Vendor : sendVendorList) {
 					PartBom partBom = new PartBom();
@@ -1049,7 +1064,9 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 		return documentArrayList;
 	}
 
-	/////////////////////////////////////////////////////////////////////// task
+	// ---------------------------------------------------
+	// ------------------ 排成SO發送進入點 -------------------
+	// ---------------------------------------------------
 	public void batchCreateSOPBExcelAndSendToFTP(Context context, String[] args) throws Exception {
 		StringList busSelectSo = new StringList();
 		busSelectSo.add(DomainConstants.SELECT_ID);
@@ -1120,7 +1137,9 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 		}
 	}
 
-	/////////////////////////////////////////////////////////////////////// web
+	// ---------------------------------------------------
+	// ------------------ 網頁SO產生進入點 -------------------
+	// ---------------------------------------------------
 	public HashMap<String, String> publishSOPBExcel(Context context, String[] args) throws Exception {
 		HashMap programMap = (HashMap) JPO.unpackArgs(args);
 		String objectId = (String) programMap.get("objectId");
@@ -1141,8 +1160,7 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 			// Data processing
 			if (soPBTitle.isReleaseSO()) {
 				ArrayList<SOPublish> soPublishArrayList = getAffectedItemInfo(context, soObj, outputSoFileName);
-				ArrayList<String> soFileArrayList = createSOExcel(context, soPublishArrayList, soPBTitle,
-						outputSoFileName);
+				ArrayList<String> soFileArrayList = createSOExcel(context, soPublishArrayList, soPBTitle,outputSoFileName);
 				if (soFileArrayList.size() == 0) {
 					throw new Exception("\u6c92\u6709\u6a94\u6848\u53ef\u4ee5\u4e0b\u8f09");
 				}
@@ -1166,7 +1184,8 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 		return returnMap;
 	}
 
-	/* <MAIN> assemble Info and publish Excel */
+	/* 主要區域 */
+	/* SOExcel產生 */
 	private ArrayList<SOPublish> getAffectedItemInfo(Context context, DomainObject soObj, String fileTempFolder)
 			throws Exception {
 
@@ -1430,7 +1449,8 @@ public class SPLM_SOPB_Excel_JPO_mxJPO {
 		}
 		return soFileArrayList;
 	}
-
+	
+	/* PBExcel產生 */
 	private ArrayList<PBPublish> getPartBulletinInfo(Context context, DomainObject soObj, String fileTempFolder)
 			throws Exception {
 
